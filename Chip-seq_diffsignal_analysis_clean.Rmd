@@ -1,0 +1,945 @@
+---
+title: "Chip_seq data analysis"
+output: html_document
+date: "2025-06-20"
+---
+
+This project is to analyse chipseq data for the Degron RPB1 project in collaboration with Scott and Alex from UNSW.
+
+---
+Differential signal analysis using extraChips
+---
+
+Given that Pol II is a combination of broad and narrow peaks,  unlike histones and TFs which is either broad or narrow, I have decided to go with differential signal analysis which goes by sliding window approach
+
+
+Tutorial for extraCHIPS : https://bioconductor.org/packages//release/bioc/vignettes/extraChIPs/inst/doc/differential_signal_sliding.html
+This part requires more than >50GB of RAM, so this part was deployed on the cluster via R
+
+```{r, run_csaw.R}
+#!/usr/bin/env Rscript
+
+library(csaw)
+library(extraChIPs)
+library(Rsamtools)
+library(rtracklayer)
+library(glue)
+library(here)
+library(stringr)
+library(magrittr)
+library(tidyverse)
+library(GenomeInfoDb)
+
+# BAM files
+bam_files <- c(
+  "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/D8L4Y_bam/D8L4Y_0h_rep1.mLb.clN.sorted.bam",
+  "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/D8L4Y_bam/D8L4Y_0h_rep2.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/D8L4Y_bam/D8L4Y_0h_rep3.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/D8L4Y_bam/D8L4Y_90min_rep1.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/D8L4Y_bam/D8L4Y_90min_rep2.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/D8L4Y_bam/D8L4Y_90min_rep3.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/D8L4Y_bam/D8L4Y_8h_rep1.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/D8L4Y_bam/D8L4Y_8h_rep2.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/INP_0h_rep1.mLb.clN.sorted.bam",
+  "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/INP_0h_rep2.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/INP_0h_rep3.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/INP_90min_rep1.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/INP_90min_rep2.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/INP_90min_rep3.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/INP_8h_rep1.mLb.clN.sorted.bam",
+ "/lmb/home/png/cephfs2/Degron_Scott/Output/chipseq_out/bamfiles/INP_8h_rep2.mLb.clN.sorted.bam"
+
+)
+
+bfl <- BamFileList(bam_files)
+names(bfl) <- tools::file_path_sans_ext(basename(bam_files))
+
+# Seqinfo (keeps only the key chromosomes, as the data wats generated from nf-core so no chr prefix)
+sq <- seqinfo(BamFile(bam_files[1]))
+sq <- keepSeqlevels(sq, c(as.character(1:22), "X", "Y"))
+
+# Grey/black lists
+blacklist <- rtracklayer::import.bed(
+  "/lmb/home/png/cephfs2/Genomes/merged_hg38_sacCer3/hg38-blacklist.v2.diffsig.bed"
+)
+blacklist <- keepSeqlevels(blacklist, seqlevels(sq), pruning.mode="coarse")
+
+# Read parameters
+rp <- readParam(
+  pe = "none",
+  dedup = TRUE,
+  discard = blacklist
+)
+
+# Count windows
+wincounts <- windowCounts(
+  bam.files = bfl,
+  spacing = 40,
+  width = 120,
+  ext = 200,
+  filter = length(bfl),
+  param = rp
+)
+
+
+# Save output
+#saveRDS(wincounts, file = "Degron_chip_wincounts.rds")
+sample <- data.frame(samples = c("D8L4Y_0h_rep1.mLb.clN.sorted",
+                                 "D8L4Y_0h_rep2.mLb.clN.sorted",
+                                 "D8L4Y_0h_rep3.mLb.clN.sorted",
+                                 "D8L4Y_90min_rep1.mLb.clN.sorted",
+                                 "D8L4Y_90min_rep2.mLb.clN.sorted",
+                                 "D8L4Y_90min_rep3.mLb.clN.sorted",
+                                 "D8L4Y_8h_rep1.mLb.clN.sorted",
+                                 "D8L4Y_8h_rep2.mLb.clN.sorted",
+                                 "INP_0h_rep1.mLb.clN.sorted",
+                                 "INP_0h_rep2.mLb.clN.sorted",
+                                 "INP_0h_rep3.mLb.clN.sorted",
+                                 "INP_90min_rep1.mLb.clN.sorted",
+                                 "INP_90min_rep2.mLb.clN.sorted",
+                                 "INP_90min_rep3.mLb.clN.sorted",
+                                 "INP_8h_rep1.mLb.clN.sorted",
+                                 "INP_8h_rep2.mLb.clN.sorted"),
+                     group = c("D8L4Y_0h",
+                                 "D8L4Y_0h",
+                                 "D8L4Y_0h",
+                                 "D8L4Y_90min",
+                                 "D8L4Y_90min",
+                                 "D8L4Y_90min",
+                                 "D8L4Y_8h",
+                                 "D8L4Y_8h",
+                                 "INP_0h",
+                                 "INP_0h",
+                                 "INP_0h",
+                                 "INP_90min",
+                                 "INP_90min",
+                                 "INP_90min",
+                                 "INP_8h",
+                                 "INP_8h"))
+#add information to the data
+
+colData(wincounts) <- colData(wincounts) %>%
+  as_tibble(rownames = "samples") %>% 
+  left_join(sample, by = "samples") %>% 
+  dplyr::select(
+    samples, all_of(colnames(colData(wincounts))), group
+  ) %>%
+  DataFrame(row.names = .$samples)
+
+
+  #import consensus narrow peaks file
+#peaks <- import("/cephfs2/png/Degron_Scott/Output/chipseq_out/D8L4Y.consensus_peaks.bed")
+
+#replace peaks with genes ie regions of interest
+regions <-  import("/cephfs2/png/Genomes/hg38/Homo_sapiens.GRCh38.113_genes_.gtf")
+#start the filtering process, match it to the sample's respective input files
+samples_list <- colnames(wincounts)
+
+#remove sample3 input for 8h as it is not used for the analysis
+samples_list <- samples_list[!samples_list %in% c(
+  "INP_8h_rep3.mLb.clN.sorted"
+)]
+
+samples_list <- samples_list[!grepl("^INP_", samples_list)]
+
+filtered_list <- list()
+
+for (s in samples_list) {
+
+  idx <- match(s, colnames(wincounts))
+  if (is.na(idx)) next
+
+  bg_sample <- sub("^D8L4Y", "INP", s)
+  bg_idx <- match(bg_sample, colnames(wincounts))
+  if (is.na(bg_idx)) next
+
+  filtered_list[[s]] <- dualFilter(
+    x   = wincounts[, idx],
+    bg  = wincounts[, bg_idx],
+    ref = regions,
+    q   = 0.6
+  )
+  #combined_counts <- do.call(cbind,
+  #lapply(filtered_list, assay)
+#)
+}
+
+saveRDS(filtered_list, "Degron_chip_filtered_counts_regions.RDS")
+
+cat("Finished successfully\n")
+```
+
+
+read in the filtered counts RDS object and proceed with differential signal analysis using sliding window
+
+```{r, diff_signal analysis}
+#!/usr/bin/env Rscript
+
+library(csaw)
+library(extraChIPs)
+library(Rsamtools)
+library(rtracklayer)
+library(glue)
+library(here)
+library(stringr)
+library(magrittr)
+library(tidyverse)
+library(GenomeInfoDb)
+library(ggplot2)
+library(viridis)
+library(MASS)
+library(ggdag)
+
+filtered_wincounts <- readRDS("Degron_chip_filtered_counts_regions.RDS")
+
+# find common genomic windows
+common_ids <- Reduce(intersect,
+                     lapply(filtered_wincounts, function(x) {
+                         rr <- rowRanges(x)
+                         paste0(seqnames(rr), ":", start(rr), "-", end(rr))
+                     }))
+
+# subset all objects to same rows
+filtered_common <- lapply(filtered_wincounts, function(se) {
+
+    rr <- rowRanges(se)
+    ids <- paste0(seqnames(rr), ":", start(rr), "-", end(rr))
+
+    se[ids %in% common_ids, ]
+})
+
+# reorder rows identically
+filtered_common <- lapply(filtered_common, function(se) {
+
+    rr <- rowRanges(se)
+    ids <- paste0(seqnames(rr), ":", start(rr), "-", end(rr))
+
+    se[match(common_ids, ids), ]
+})
+
+# combine samples
+combined <- do.call(cbind, filtered_common)
+
+#plot assay densities with the common ones
+# Assaydensity <- plotAssayDensities(combined,
+#                    assay = "logCPM",
+#                    colour = "sample") +
+#   theme_bw()
+
+#PCA
+# PCA <- plotAssayPCA(combined, "logCPM", colour = "group", label = "sample") +
+#   theme_bw()
+ 
+#  ggsave(
+#     filename = "PCA_extraChips.pdf",
+#     plot = PCA,
+#     width = 6,
+#     height = 4
+# )
+#RLE
+# RLE_plot <-  plotAssayRle(combined, assay = "logCPM", fill = "sample") +
+#   geom_hline(yintercept = 0, linetype = 2, colour = "grey") +
+#   ggtitle("RLE: Across All Samples") +
+#   theme_bw() +
+#    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+ 
+#  ggsave(
+#     filename = "RLE_extraChips.pdf",
+#     plot = RLE_plot,
+#     width = 6,
+#     height = 4
+# )
+
+
+# Differential region analysis and significance-aware merging
+# ____________________________________________________________
+#
+# This workflow processes differential binding results separately
+# for each experimental contrast (90 min vs 0 h and 8 h vs 0 h).
+#
+# 1. Significance definition:
+#    For each fitted model, regions are classified as significant
+#    based on an FDR threshold (< 0.05).
+#
+# 2. Conditional region merging:
+#    - If no significant regions are detected, the original
+#      window-level results are retained and placeholder values
+#      are assigned for merged p-values.
+#    - If significant regions exist, adjacent significant windows
+#      are merged using a harmonic mean p-value (HMP) approach
+#      within a specified genomic distance (merge_within = 120 bp).
+#
+# 3. Post-processing:
+#    - Merged regions are annotated with differential status
+#      (via addDiffStatus).
+#    - This allows downstream visualization and interpretation
+#      of region-level differential signal.
+#
+# 4. Purpose:
+#    This step reduces redundancy from overlapping sliding windows
+#    and enables identification of broader genomic regions of
+#    consistent differential signal across conditions.
+#
+# NOTE:
+# Each contrast (fit_90, fit_8h) is processed independently to
+# preserve condition-specific biological signals.
+#
+# ============================================================
+library(scales)
+X <- model.matrix(~group, data = colData(combined))
+
+#X
+#                                (Intercept) groupD8L4Y_8h groupD8L4Y_90min
+#D8L4Y_0h_rep1.mLb.clN.sorted              1             0                0
+#D8L4Y_0h_rep2.mLb.clN.sorted              1             0                0
+#D8L4Y_0h_rep3.mLb.clN.sorted              1             0                0
+#D8L4Y_90min_rep1.mLb.clN.sorted           1             0                1
+#D8L4Y_90min_rep2.mLb.clN.sorted           1             0                1
+#D8L4Y_90min_rep3.mLb.clN.sorted           1             0                1
+#D8L4Y_8h_rep1.mLb.clN.sorted              1             1                0
+#D8L4Y_8h_rep2.mLb.clN.sorted              1             1                0
+#attr(,"assign")
+#[1] 0 1 1
+#attr(,"contrasts")
+#attr(,"contrasts")$group
+#[1] "contr.treatment"
+
+
+
+
+#differential signal of 90min vs 0h 
+fit_90 <- fitAssayDiff(
+  combined,
+  design = X,
+  coef = "groupD8L4Y_90min",
+  fc = 1.0, #no foldchange implied, unless i use lfc
+  asRanges = TRUE
+)
+
+#differential signal of 8h vs 0h
+fit_8h <- fitAssayDiff(
+  combined,
+  design = X,
+  coef = "groupD8L4Y_8h",
+  fc = 1.0, #no foldchange implied, unless i use lfc
+  asRanges = TRUE
+)
+
+
+# all_plot <- fit_gr %>% 
+#   as_tibble() %>% 
+#   ggplot(aes(logCPM, logFC)) +
+#   geom_point(alpha = 0.6) +
+#   geom_smooth(se = FALSE, method = "loess") +
+#   geom_label(
+#     aes(label = label),
+#     data = . %>% 
+#       summarise(
+#         n = dplyr::n(),
+#         logCPM = max(logCPM) - 0.15 * diff(range(logCPM)),
+#         logFC = max(logFC) - 0.05 * diff(range(logFC)),
+#         label = glue("{comma(n)}\nSliding Windows")
+#       )
+#   ) +
+#   ylim(range(fit_gr$logFC)) +
+#   ggtitle("MA Plot: All Retained Sliding Windows")
+
+
+
+#plot the differential binding result, but did not work because checked there is no signal
+fit_90$sig <- fit_90$FDR < 0.05
+fit_8h$sig <- fit_8h$FDR < 0.05
+
+
+if (!any(fit_90$sig, na.rm = TRUE)) {
+
+    results_90_xchip <- fit_90
+    mcols(results_90_xchip)$hmPValue <- NA
+    mcols(results_90_xchip)$hmPValue_fdr <- NA
+
+} else {
+
+    results_90_xchip <- mergeByHMP(
+        fit_90,
+        sig_col = "sig",
+        merge_within = 120
+    ) %>%
+        addDiffStatus(
+            sig_col = "sig",
+            drop = TRUE
+        )
+}
+
+if (!any(fit_8h$sig, na.rm = TRUE)) {
+
+    results_8h_xchip <- fit_8h
+    mcols(results_8h_xchip)$hmPValue <- NA
+    mcols(results_8h_xchip)$hmPValue_fdr <- NA
+
+} else {
+
+    results_8h_xchip <- mergeByHMP(
+        fit_8h,
+        sig_col = "sig",
+        merge_within = 120
+    ) %>%
+        addDiffStatus(
+            sig_col = "sig",
+            drop = TRUE
+        )
+}
+
+#check for number of merged_windows which are less than 0.05
+
+table(results_8h_xchip$FDR < 0.05)
+table(results_90_xchip$FDR < 0.05)
+
+#cross check the stats before merging using mergeHPM
+#> table(results_8h_xchip$FDR < 0.05)
+#  FALSE 
+# 4013881 
+#table(results_90_xchip$FDR < 0.05)
+#  FALSE 
+# 4013881 
+
+#90min vs 0h
+df_90 <- results_90_xchip %>%
+  as_tibble() %>%
+  mutate(FDR_sig = hmPValue_fdr < 0.05)
+
+
+#generate the all regions MA plots
+FDR_plot_90 <- ggplot(df_90, aes(logCPM, logFC)) +
+
+  geom_point(alpha = 0.5, colour = "grey70") +
+
+  geom_point(
+    data = df_90 %>% dplyr::filter(FDR_sig),
+    colour = "red",
+    alpha = 0.8
+  ) +
+
+   geom_hline(yintercept = 0) +
+  
+  scale_y_continuous(limits = c(-2,2), breaks = c(-2, -1, 0, 1, 2)) +
+  annotate(
+    "text",
+    x = Inf, y = Inf,
+    hjust = 1.1, vjust = 1.5,
+    label = paste0(
+      "FDR < 0.05: ",
+      sum(df_90$FDR_sig, na.rm = TRUE),
+      " regions\n(out of ",
+      nrow(df_90),
+      ")"
+    )
+  ) +
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+   panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+  ggtitle("MA Plot: differential signal analysis 90 min vs 0h") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  remove_grid()
+
+#8h vs 0h
+df_8h <- results_8h_xchip %>%
+  as_tibble() %>%
+  mutate(FDR_sig = hmPValue_fdr < 0.05)
+
+
+#generate the all regions MA plots
+FDR_plot_8h <- ggplot(df_8h, aes(logCPM, logFC)) +
+
+  geom_point(alpha = 0.5, colour = "grey70") +
+
+  geom_point(
+    data = df_8h %>% dplyr::filter(FDR_sig),
+    colour = "red",
+    alpha = 0.8
+  ) +
+
+  geom_hline(yintercept = 0) +
+scale_y_continuous(limits = c(-2,2),breaks = c(-2, -1, 0, 1, 2)) +
+  annotate(
+    "text",
+    x = Inf, y = Inf,
+    hjust = 1.1, vjust = 1.5,
+    label = paste0(
+      "FDR < 0.05: ",
+      sum(df_8h$FDR_sig, na.rm = TRUE),
+      " regions\n(out of ",
+      nrow(df_8h),
+      ")"
+    )
+  ) +
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+   panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+  ggtitle("MA Plot: differential signal analysis 8h vs 0h") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  remove_grid()
+
+ggsave("MA_xchips_90min_vs_0h.png", FDR_plot_90, width = 8, height = 6, dpi = 300)
+ggsave("MA_xchips_8h_vs_0h.png", FDR_plot_8h, width = 8, height = 6, dpi = 300)
+
+
+#now do by TSS
+gtf.dat <- import("/cephfs2/png/Genomes/hg38/Homo_sapiens.GRCh38.113.gtf")
+gene.gr <- gtf.dat[gtf.dat$type %in% "gene",]
+names(gene.gr) <- gene.gr$gene_id
+gene.gr$gene.width <- GenomicRanges::width(gene.gr)
+gene.gr$gene_name_column <- gene.gr$gene_name
+
+gene.gr <- gene.gr[width(gene.gr) >1000]
+gene.gr <- gene.gr[gene.gr$gene_biotype %in% "protein_coding"]
+gene.gr <- gene.gr[countOverlaps(gene.gr,gene.gr) == 1]
+
+
+#make sure gene.gr is > 1kb and only has non-overlapping protein coding genes
+tss <- resize(gene.gr, width = 1, fix = "start")
+tss_500 <- promoters(tss, upstream = 30, downstream = 300)
+#flank(tss, width = 500, start = TRUE)
+tss_hits <- subsetByOverlaps(results_90_xchip, tss_500)
+
+df_tss <- as_tibble(tss_hits) %>%
+  mutate(FDR_sig = FDR < 0.05)
+
+
+n_sig2 <- sum(df_tss$FDR_sig, na.rm = TRUE)
+n_tot2 <- nrow(df_tss)
+
+
+# #plot the TSS only MA density plot
+MAplot_TSS_90min <- ggplot(df_tss, aes(x = logCPM, y = logFC)) +
+
+  # optional faint points (same as your res_df2 plot)
+  geom_point(alpha = 0.3, size = 0.8, color = "grey") +
+
+  # 2D density (matches your style)
+  stat_density_2d(
+    aes(fill = after_stat(level), alpha = after_stat(level)),
+    geom = "polygon",
+    contour = TRUE,
+    bins = 20
+  ) +
+
+  # FDR significant points
+  geom_point(
+    data = df_tss %>% dplyr::filter(FDR_sig),
+    color = "red",
+    size = 0.8
+  ) +
+
+  geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
+
+  scale_fill_viridis_c(option = "magma", name = "Density") +
+  scale_alpha(range = c(0.2, 0.8), guide = "none") +
+
+  scale_y_continuous(limits = c(-1.5, 1.5),breaks=c(-1.5,-1,0,1,1.5)) +
+
+    theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  )  +
+  labs(
+    x = "logCPM",
+    y = "log2 Fold Change",
+    title = "differential signal TSS MA plot with density (90min vs 0h)"
+  ) +
+  annotate(
+  "text",
+  x = Inf, y = Inf,
+  hjust = 1.1, vjust = 1.5,
+  label = paste0(
+    "FDR < 0.05: ",
+    sum(df_tss$FDR_sig, na.rm = TRUE),
+    " / ",
+    nrow(df_tss)
+  )
+) +
+  remove_grid()
+
+#8h TSS±500bp
+tss_hits_8h <- subsetByOverlaps(results_8h_xchip, tss_500)
+
+df_tss_8h <- as_tibble(tss_hits_8h) %>%
+  mutate(FDR_sig = FDR < 0.05)
+
+n_sig <- sum(df_tss_8h$FDR_sig, na.rm = TRUE)
+n_tot <- nrow(df_tss_8h)
+
+
+#generate the TSS desnity MA plot
+MAplot_TSS_8h <- ggplot(df_tss_8h, aes(x = logCPM, y = logFC)) +
+
+  # optional faint points (same as your res_df2 plot)
+  geom_point(alpha = 0.3, size = 0.8, color = "grey") +
+
+  # 2D density (matches your style)
+  stat_density_2d(
+    aes(fill = after_stat(level), alpha = after_stat(level)),
+    geom = "polygon",
+    contour = TRUE,
+    bins = 20
+  ) +
+
+  # FDR significant points
+  geom_point(
+    data = df_tss_8h %>% dplyr::filter(FDR_sig),
+    color = "red",
+    size = 0.8
+  ) +
+
+  geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
+
+  scale_fill_viridis_c(option = "magma", name = "Density") +
+  scale_alpha(range = c(0.2, 0.8), guide = "none") +
+
+  scale_y_continuous(limits = c(-1.5, 1.5),breaks=c(-1.5,-1,0,1,1.5)) +
+
+    theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  )  +
+  labs(
+    x = "logCPM",
+    y = "log2 Fold Change",
+    title = "differential signal TSS MA plot with density (8h vs 0h)"
+  ) +
+  annotate(
+  "text",
+  x = Inf, y = Inf,
+  hjust = 1.1, vjust = 1.5,
+  label = paste0(
+    "FDR < 0.05: ",
+    sum(df_tss_8h$FDR_sig, na.rm = TRUE),
+    " / ",
+    nrow(df_tss_8h)
+  )
+) +
+  remove_grid()
+
+ggsave("MA_xchips_TSS_90min_vs_0h.png", MAplot_TSS_90min, width = 8, height = 6, dpi = 300)
+ggsave("MA_xchips_TSS_8h_vs_0h.png", MAplot_TSS_8h, width = 8, height = 6, dpi = 300)
+
+
+###repeat the same for genebody
+hg38.gene.body.bed <-  read.table(
+    "/cephfs2/png/Genomes/hg38/hg38.gene.body.bed",
+    sep = "\t",
+    header = TRUE,
+    stringsAsFactors = FALSE
+)
+
+genebody <- GenomicRanges::makeGRangesFromDataFrame(
+  hg38.gene.body.bed ,
+  seqnames.field = "chr",
+  start.field    = "start",
+  end.field      = "end",
+  keep.extra.columns = TRUE
+)
+
+seqlevels(genebody) <- sub("^chr", "", seqlevels(genebody))
+seqnames(genebody) <- sub("^chr", "", seqnames(genebody))
+
+
+#90mins vs 0h
+genebody_hits <- subsetByOverlaps(results_90_xchip, genebody)
+
+df_genebody <- as_tibble(genebody_hits) %>%
+  mutate(FDR_sig = FDR < 0.05)
+
+
+#check the significance statistics
+n_sig3 <- sum(df_genebody$FDR_sig, na.rm = TRUE)
+n_tot3 <- nrow(df_genebody)
+
+
+#generate the density MA plot
+MAplot_genebody_90mins <- ggplot(df_genebody, aes(x = logCPM, y = logFC)) +
+
+  # optional faint points (same as your res_df2 plot)
+  geom_point(alpha = 0.3, size = 0.8, color = "grey") +
+
+  # 2D density (matches your style)
+  stat_density_2d(
+    aes(fill = after_stat(level), alpha = after_stat(level)),
+    geom = "polygon",
+    contour = TRUE,
+    bins = 20
+  ) +
+
+  # FDR significant points
+  geom_point(
+    data = df_genebody %>% dplyr::filter(FDR_sig),
+    color = "red",
+    size = 0.8
+  ) +
+
+  geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
+
+  scale_fill_viridis_c(option = "magma", name = "Density") +
+  scale_alpha(range = c(0.2, 0.8), guide = "none") +
+
+  scale_y_continuous(limits = c(-2, 2)) +
+
+   theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  )  +
+  labs(
+    x = "logCPM",
+    y = "log2 Fold Change",
+    title = "differential signal gene body MA plot with density (90min vs 0h)"
+  ) +
+  annotate(
+  "text",
+  x = Inf, y = Inf,
+  hjust = 1.1, vjust = 1.5,
+  label = paste0(
+    "FDR < 0.05: ",
+    sum(df_genebody$FDR_sig, na.rm = TRUE),
+    " / ",
+    nrow(df_genebody)
+  )
+) +
+  remove_grid()
+
+
+#8h vs 0h
+genebody_hits_8h <- subsetByOverlaps(results_8h_xchip, genebody)
+
+df_genebody_8h <- as_tibble(genebody_hits_8h) %>%
+  mutate(FDR_sig = FDR < 0.05)
+
+#check the significance statistics
+n_sig4 <- sum(df_genebody_8h$FDR_sig, na.rm = TRUE)
+n_tot4 <- nrow(df_genebody_8h)
+
+
+#generate the density MA plot
+MAplot_genebody_8h <- ggplot(df_genebody_8h, aes(x = logCPM, y = logFC)) +
+
+  # optional faint points (same as your res_df2 plot)
+  geom_point(alpha = 0.3, size = 0.8, color = "grey") +
+
+  # 2D density (matches your style)
+  stat_density_2d(
+    aes(fill = after_stat(level), alpha = after_stat(level)),
+    geom = "polygon",
+    contour = TRUE,
+    bins = 20
+  ) +
+
+  # FDR significant points
+  geom_point(
+    data = df_genebody_8h %>% dplyr::filter(FDR_sig),
+    color = "red",
+    size = 0.8
+  ) +
+
+  geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
+
+  scale_fill_viridis_c(option = "magma", name = "Density") +
+  scale_alpha(range = c(0.2, 0.8), guide = "none") +
+
+  scale_y_continuous(limits = c(-2, 2)) +
+
+    theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  )  +
+  labs(
+    x = "logCPM",
+    y = "log2 Fold Change",
+    title = "differential signal gene body MA plot with density (8h vs 0h)"
+  ) +
+  annotate(
+  "text",
+  x = Inf, y = Inf,
+  hjust = 1.1, vjust = 1.5,
+  label = paste0(
+    "FDR < 0.05: ",
+    sum(df_genebody_8h$FDR_sig, na.rm = TRUE),
+    " / ",
+    nrow(df_genebody_8h)
+  )
+) +
+  remove_grid()
+
+  
+ggsave("MA_xchips_genebody_90min_vs_0h.png", MAplot_genebody_90mins, width = 8, height = 6, dpi = 300)
+ggsave("MA_xchips_genebody_8h_vs_0h.png", MAplot_genebody_8h, width = 8, height = 6, dpi = 300)
+
+saveRDS(df_tss, "df_tss_90min.rds")
+saveRDS(df_tss_8h, "df_tss_8h.rds")
+
+saveRDS(df_genebody, "df_genebody_90min.rds")
+saveRDS(df_genebody_8h, "df_genebody_8h.rds")
+
+#move the stats genartion part to local Rstudio
+#generating tsv reports
+# df_90_out <- results_90_xchip %>%
+#   as_tibble() %>%
+#   dplyr::select(seqnames, start, end, logCPM, logFC, hmPValue, hmPValue_fdr)
+
+# readr::write_tsv(df_90_out, "xchip_90min_vs_0h_all_regions.tsv")
+
+# df_8h_out <- results_8h_xchip %>%
+#   as_tibble() %>%
+#   dplyr::select(seqnames, start, end, logCPM, logFC, hmPValue, hmPValue_fdr)
+
+# readr::write_tsv(df_8h_out, "xchip_8h_vs_0h_all_regions.tsv")
+
+# df_tss_out <- df_tss %>%
+#   mutate(
+#     gene_id = mcols(tss_hits)$gene_id,
+#     gene_name = mcols(tss_hits)$gene_name
+#   ) %>%
+#   dplyr::select(
+#     gene_id,
+#     gene_name,
+#     seqnames,
+#     start,
+#     end,
+#     logCPM,
+#     logFC,
+#     hmPValue,
+#     FDR = hmPValue_fdr,
+#     FDR_sig
+#   )
+
+# readr::write_tsv(df_tss_out, "xchip_90min_TSS.tsv")
+
+# df_tss_8h_out <- df_tss_8h %>%
+#   mutate(
+#     gene_id = mcols(tss_hits_8h)$gene_id,
+#     gene_name = mcols(tss_hits_8h)$gene_name
+#   ) %>%
+#   dplyr::select(
+#     gene_id,
+#     gene_name,
+#     seqnames,
+#     start,
+#     end,
+#     logCPM,
+#     logFC,
+#     hmPValue,
+#     FDR = hmPValue_fdr,
+#     FDR_sig
+#   )
+
+# readr::write_tsv(df_tss_8h_out, "xchip_8h_TSS.tsv")
+
+
+# df_genebody_90min_out <- df_genebody %>%
+#   mutate(
+#     gene_id = mcols(genebody_hits)$gene_id,
+#     gene_name = mcols(genebody_hits)$gene_name
+#   ) %>%
+#   dplyr::select(
+#     gene_id,
+#     gene_name,
+#     seqnames,
+#     start,
+#     end,
+#     logCPM,
+#     logFC,
+#     hmPValue,
+#     FDR = hmPValue_fdr,
+#     FDR_sig
+#   )
+
+# readr::write_tsv(df_genebody_90min_out, "xchip_90min_gene_body.tsv")
+
+
+# df_genebody_8h_out <- df_genebody_8h %>%
+#   mutate(
+#     gene_id = mcols(genebody_hits_8h)$gene_id,
+#     gene_name = mcols(genebody_hits_8h)$gene_name
+#   ) %>%
+#   dplyr::select(
+#     gene_id,
+#     gene_name,
+#     seqnames,
+#     start,
+#     end,
+#     logCPM,
+#     logFC,
+#     hmPValue,
+#     FDR = hmPValue_fdr,
+#     FDR_sig
+#   )
+
+# readr::write_tsv(df_genebody_8h_out, "xchip_8h_gene_body.tsv")
+```
+
