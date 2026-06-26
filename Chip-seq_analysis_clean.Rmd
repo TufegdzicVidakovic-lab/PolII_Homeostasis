@@ -1,0 +1,1839 @@
+---
+title: "Chip_seq data analysis"
+output: html_document
+date: "2025-06-20"
+---
+
+
+the Guidepiper pipeline performed the following analysis (https://nf-co.re/chipseq/2.1.0), however even the pipeline claims there is diffbind in the notes, there is no diff bind results. The accurate ones will be in the ones illustrated in the graphical summary of the page attached
+
+So for this dataset, I will need to do the following
+1) RPKM bigwig from Guipiper pieline - can be used for metagene analysis
+2)bigwig visualisation (RPKM normalised and deeptools scalefactor normalised) - note this is not from the Guidepiper pipeline, for post metagene plot analysis
+2) TT-gene metageneplot (normalised to the upstream 5kb of TSS)
+3) Pol II abundance at TSS
+4) Pausing Index analysis
+
+---
+Chipseq QC
+---
+
+create metadata file for ChipQC about sample information
+```{r}
+library(readr)
+library(Rsamtools)
+library(rtracklayer)
+library(ChIPQC)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tidyverse)
+library(GenomicRanges)
+library(GenomicFeatures)
+library("TxDb.Hsapiens.UCSC.hg38.knownGene")
+
+#create metadata for chipqc
+sampleinfo <- read_csv("ChipQC_degron_RPB1_metadata.csv")
+
+chipObj <- ChIPQC(sampleinfo, annotation="hg38") 
+
+```
+Generate ChipQC report
+```{r}
+ChIPQCreport(chipObj, reportName="ChIP QC report: narrow peak", reportFolder="ChIPQCreport")
+```
+
+
+
+---
+Metagene plot analysis
+---
+
+Generate non-overlapping annotation file, retaining genes which are more than 1.0kb long. This is to reduce the noise of the metagene plot
+
+Convert it into a data frame and filter for genes; to prevent errors, set the minimum gene width to the number of tiles that each gene will be split into. Depending on the goals of the analysis, it may be appropriate to add further filters for gene biotype, width or minimum coverage in this step.
+```{r}
+#annotation file (the same as in ELOA P1)
+#hg38.gtf <- read.table("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf", header=FALSE, sep= "\t")
+
+#generate non-overlapping gene annotation (using Granges, rtracklayer , and genomicfeatures)
+gtf.dat <- import("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf")
+gene.gr <- gtf.dat[gtf.dat$type %in% "gene",]
+names(gene.gr) <- gene.gr$gene_id
+gene.gr$gene.width <- GenomicRanges::width(gene.gr)
+gene.gr$gene_name_column <- gene.gr$gene_name
+
+gene.gr <- gene.gr[width(gene.gr) >1000]
+gene.gr <- gene.gr[gene.gr$gene_biotype %in% "protein_coding"]
+gene.gr <- gene.gr[countOverlaps(gene.gr,gene.gr) == 1]
+gene.gr <- keepSeqlevels(gene.gr,c(as.character(1:22),"X","Y"),pruning.mode="coarse")
+#convert to dataframe from this step 9Granges can be problematic)
+hg38.genes <- as.data.frame(gene.gr) %>% dplyr::rename("chr" = "seqnames") %>% mutate(chr = paste0("chr", chr))
+
+hg38.genes.5kb <- as.data.frame(gene.gr.5kb) %>% dplyr::rename("chr" = "seqnames") %>% mutate(chr = paste0("chr", chr))
+# Filter genes by strand
+hg38.genes.pos <- hg38.genes %>% filter(strand=="+") 
+hg38.genes.neg <- hg38.genes %>% filter(strand=="-")
+ 
+#the 5kb is for gene body (boxplot) analysis
+hg38.genes.pos.5kb <- hg38.genes.5kb %>% filter(strand=="+")
+hg38.genes.neg.5kb <- hg38.genes.5kb %>% filter(strand=="-")
+# Define upstream and downstream flanking regions 
+# Note that mutate() updates columns from left to right: it first moves ‘start’ 5 kb upstream, then sets ‘end’ 5 kb downstream of this new start. The resulting window (for upstream flanking regions) therefore runs from −5 kb to the TSS.
+hg38.genes.pos.upstream.flank <- hg38.genes.pos %>% mutate(start=start-5000,end=start+5000) %>% filter(start>0)
+hg38.genes.neg.upstream.flank <- hg38.genes.neg  %>% mutate(start=end,end=start+5000) %>% filter(start>0)
+hg38.genes.pos.downstream.flank <- hg38.genes.pos %>% mutate(start=end,end=start+5000)
+hg38.genes.neg.downstream.flank <- hg38.genes.neg  %>% mutate(start=start-5000,end=start+5000)
+ 
+# Save files
+write.table(hg38.genes.pos, "hg38.genes.pos.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.neg, "hg38.genes.neg.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.pos.upstream.flank, "hg38.genes.pos.upstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.neg.upstream.flank, "hg38.genes.neg.upstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.pos.downstream.flank, "hg38.genes.pos.downstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.neg.downstream.flank, "hg38.genes.neg.downstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+
+#rm(gene.gr)
+#rm(gtf.dat)
+
+#this is just to check if the function of promoters including upstream and downstream regions factors in strandness of the sequences "+" and "-"
+
+#gene.gr
+#PRDM16        1   3069168-3438621      + | ensembl_havana     gene        NA      <NA> ENSG00000142611           17
+#PEX10        1   2403964-2413797   
+   
+#interval.gr
+#PRDM16     chr1   3064168-3079167      + | ensembl_havana     gene        NA      <NA> ENSG00000142611           17
+#PEX10     chr1   2403798-2418797
+#For PEX10:  2418797-2413797
+#[1] 5000
+
+#For PRDM16: 3064168-3069168
+#[1] -5000
+```
+
+After this use bedtools to split windows.
+
+```{bash, chipseq_bedtools_makewindows.sh}
+
+#tile the bed files 
+bedtools makewindows -b hg38.genes.pos.bed -n 60 -i winnum > hg38.pos.windows.60w.bed
+bedtools makewindows -b hg38.genes.neg.bed -n 60 -i winnum -reverse > hg38.neg.windows.60w.bed
+
+
+#for upstream flanked
+bedtools makewindows -b hg38.genes.pos.upstream.flank.bed -n 20 -i winnum > hg38.pos.upstream.windows.20w.bed
+bedtools makewindows -b hg38.genes.neg.upstream.flank.bed -n 20 -i winnum -reverse > hg38.neg.upstream.windows.20w.bed
+
+#for downstream flanked
+
+bedtools makewindows -b hg38.genes.pos.downstream.flank.bed -n 20 -i winnum > hg38.pos.downstream.windows.20w.bed
+bedtools makewindows -b hg38.genes.neg.downstream.flank.bed -n 20 -i winnum -reverse > hg38.neg.downstream.windows.20w.bed
+# Combine the files as in the Star protocol (instead of R use awk so I can sort)
+
+# Step 1: Combine gene tiles and add 20 to bin numbers (V4)
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 20; print }' hg38.pos.windows.60w.bed > genes.tmp
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 20; print }' hg38.neg.windows.60w.bed >> genes.tmp
+
+# Step 2: Combine upstream flanks without change
+cat hg38.pos.upstream.windows.20w.bed hg38.neg.upstream.windows.20w.bed > upstream.tmp
+
+
+# Step 3: Combine downstream flanks and add 80 to bin numbers (V4)
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 80; print }' hg38.pos.downstream.windows.20w.bed > downstream.tmp
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 80; print }' hg38.neg.downstream.windows.20w.bed >> downstream.tmp
+
+# Step 4: Combine all tiles
+cat genes.tmp upstream.tmp downstream.tmp > hg38.genes.and.flanks.tiled.bed
+
+# Step 5: Cleanup temporary files
+rm genes.tmp upstream.tmp downstream.tmp
+
+# Sort
+sort -k1,1 -k2,2n hg38.genes.and.flanks.tiled.bed > hg38.genes.and.flanks.tiled.sorted.bed
+
+```
+
+map it onto the binned, non-overlapping bedfiles
+
+note: For this part of the script, use the same name bash script and run it on the cluster
+
+```{bash, chipseq_array_bigwig.sh}
+
+############################## generate big wig files using job array ###################
+
+#Pre-script execution:
+#Pre-script execution:
+#Before running this script, run this code to generate file list with job arrays:
+#ls ${FILESDIR}| rev | cut -c 12- | rev | uniq > chip_bw_list.txt
+
+
+#these individual big wig file has been normalised using RPKM
+#run UCSC bigwigMerge to combine the bigwigs (do all except for the rep3 8h - exclude from the study as we have verieid that it is a problematic sample, moved it to merged library)
+bigWigMerge ${FILESDIR}/${PREFIX}_rep1.bigWig ${FILESDIR}/${PREFIX}_rep2.bigWig ${FILESDIR}/${PREFIX}_rep3.bigWig ${OUTDIR}/${PREFIX}_merged.bedGraph 
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "bigwig merging failed for ${PREFIX}" >&2
+    exit 1
+else
+    echo "bigwig merging succeeded for ${PREFIX}"
+fi
+
+
+#sort the bedgraphs
+bedSort ${OUTDIR}/${PREFIX}_merged.bedGraph  ${OUTDIR}/${PREFIX}_merged_sorted.bedGraph
+
+#convert the bedgraph to bigwig again
+bedGraphToBigWig ${OUTDIR}/${PREFIX}_merged_sorted.bedGraph ${REFDIR}/homo_sapiens__GRCh38__release102.dna.fa.sizes ${OUTDIR}/${PREFIX}_merged.bw
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "conversion to bigwig failed for ${PREFIX}" >&2
+    exit 3
+else
+    echo "conversion to bigwig succeeded for ${PREFIX}"
+fi
+
+#filter for main chromosomes but also append "chr" to the chromosomes that were kept for mapping compatibility downstream
+awk '$1 ~ /^(1?[0-9]|2[0-2]|X|Y|M)$/ { $1 = "chr"$1; print }' OFS='\t' "${OUTDIR}/${PREFIX}_merged_sorted.bedGraph" > "${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph"
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "bed cleaning new failed for ${PREFIX}" >&2
+    exit 6
+else
+    echo "bed cleaning new succeeded for ${PREFIX}"
+fi
+
+
+
+###################################### DO NOT RUN this as part of the pipeline #####################
+#blacklisted regions has been filtered out using samtools and bamtools according to the nextflowpipeline
+
+
+#parse the defined bed files from gtfs and map it to the cleaned bed files (sorted using bedSort)
+#bedtools map -a ./Datasets/POLII_ARMC5_8_24/Analysis/Windows/hg38.TSS.windows.100w.sorted.bed -b ./Datasets/POLII_ARMC5_8_24/bed_RPKM/K8_INP_merged.50nt.RPKM.blacklist.bed -c 4 -o mean -null 0 > ./Datasets/POLII_ARMC5_8_24/Analysis/Coverage/hg38.genes.K8_INP.fwd.coverage.bed
+#bedtools map -a ./Datasets/POLII_ARMC5_8_24/Analysis/Windows/hg38.TSS.windows.100w.sorted.bed -b ./Datasets/POLII_ARMC5_8_24/bed_RPKM/K_INP_merged.50nt.RPKM.blacklist.bed -c 4 -o mean -null 0 > ./Datasets/POLII_ARMC5_8_24/Analysis/Coverage/hg38.genes.K_INP.fwd.coverage.bed
+
+bedtools map -a ${OUTDIR}/hg38.genes.and.flanks.tiled.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_redone.bed
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to tiled gtf failed for ${PREFIX}" >&2
+    exit 9
+else
+    echo "mapping to tiled gtf succeeded for ${PREFIX}"
+fi
+
+```
+
+
+read in all the remapped bed files with binned coverage
+```{r}
+avg_bed_pattern = "\\merged.clean.cov_redone.bed"
+
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb 
+list.files(pattern = avg_bed_pattern) %>%
+  walk(function(x) {
+    print(x)
+    
+    df <- read.table(x, header = FALSE) %>%
+      dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5) 
+   
+    # Extract prefix of filename (remove extension)
+    prefix <- str_remove(basename(x), "\\.[^.]*$")
+    
+    # Assign individual dataframe to an object named after the prefix
+    assign(paste0(prefix, "_5kb"), df, envir = .GlobalEnv)
+  })
+```
+
+
+normalise the coverage to generate the metagene plot
+```{r}
+
+#list all the dataframe which I wanted to loop
+coverage_list <- list(
+  D8L4Y_0h = D8L4Y_0h_merged.clean.cov_redone_5kb,
+  D8L4Y_90min = D8L4Y_90min_merged.clean.cov_redone_5kb,
+  D8L4Y_8h = D8L4Y_8h_merged.clean.cov_redone_5kb,
+  Input = INP_0h_merged.clean.cov_redone_5kb
+)
+
+#create function to parse thrugh dataframes to calculate mean and sem then normalized all values to the first bin
+#this part is where the normalised signal to background comes in
+normalize_coverage <- function(df) {
+  df %>%
+    group_by(bin) %>%
+    summarise(
+      COV.mean = mean(COV),
+      SEM = sd(COV) / sqrt(n()),
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(
+      COV.norm = COV.mean / COV.mean[1], #normalisation to the background ie region upstream of the TSS
+      SEM.norm = SEM / COV.mean[1]
+    )
+}
+ 
+
+#lapplt the function across all dataframes 
+plot_list <- lapply(coverage_list, normalize_coverage)
+
+#combine the individual dataframes into plots
+combined.plot <- bind_rows(plot_list, .id = "Sample")
+
+#make sure the legend is in the right order
+combined.plot$Sample <- factor(
+  combined.plot$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min", "D8L4Y_8h", "Input")
+)
+
+# plot the coverage plot
+metagene_plot <- ggplot(combined.plot, aes(x = bin, y = COV.norm, color = Sample, fill = Sample)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = COV.norm - SEM.norm, ymax = COV.norm + SEM.norm), alpha = 0.3, color = NA) +
+  scale_x_continuous(
+    breaks = c(1, 20, 40, 60, 80, 100),
+    labels = c("1" = "-5kb", "20" = "TSS", "40" = "33%", "60" = "66%", "80" = "TTS", "100" = "+5kb")
+  ) +
+  ylab("Normalised coverage (signal / background)") +
+  theme_bw() +
+  scale_color_manual(values = c( "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  theme(
+    aspect.ratio = 1,
+    axis.text.x = element_text(size = 11, hjust = 0.5),
+    axis.text.y = element_text(size = 11),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 12, face = "bold", vjust = 4),
+    plot.title = element_text(size = 15, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+#supplementary figure 6
+combined.plot.partial <- combined.plot %>% dplyr::filter(Sample != "D8L4Y_8h" )
+
+combined.plot.partial$Sample <- factor(
+  combined.plot.partial$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min","Input")
+)
+
+
+#metagene plot 90min vs 0h only
+
+metagene_plot.partial <- ggplot(combined.plot.partial, aes(x = bin, y = COV.norm, color = Sample, fill = Sample)) +
+  geom_line(size = 0.5) +
+  geom_ribbon(aes(ymin = COV.norm - SEM.norm, ymax = COV.norm + SEM.norm), alpha = 0.3, color = NA) +
+  scale_x_continuous(
+    breaks = c(1, 20, 40, 60, 80, 100),
+    labels = c("1" = "-5kb", "20" = "TSS", "40" = "33%", "60" = "66%", "80" = "TTS", "100" = "+5kb")
+  ) +
+  ylab("Normalised coverage") +
+  theme_bw() +
+  scale_color_manual(values = c( "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  scale_color_manual(values = c( "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  theme(text = element_text(family = "sans"),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+     axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 14),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+  remove_grid()
+
+ggsave("Supplementary figure 6A.pdf",
+       plot = metagene_plot.partial,
+       width = 4.5,
+       height = 3.5,
+       units = "in")
+
+```
+Note from the STAR protocol -If bigwigs have been normalized using a spike-in, additional normalization to the upstream intergenic signal is not required. In the plotting function, use mean coverage instead of normalized coverage ('COV.mean' instead of 'COV.norm'; 'SEM' instead of 'SEM.norm').
+
+The reason we are doing this because there is no spike-in control for this experiment
+
+---
+generate zoom in plots around the metagene plots
+---
+
+For TSS
+
+```{r}
+
+############ 500bp
+#TSS (gene length > 1kb) . Note this code is the same as the code for the boxplot
+hg38.TSS.bed.pos <- hg38.genes.pos %>% mutate(length = end - start) %>% mutate(start=as.numeric(start-500), end=as.numeric(start+1000)) %>% filter(start>0) #%>%  filter(length>5000,length<=10000)
+hg38.TSS.bed.neg <- hg38.genes.neg %>% mutate(length = end - start) %>% mutate(start=as.numeric(end-500), end=as.numeric(start+1000)) %>% filter(start>0)#%>%  filter(length>5000,length<=10000)
+
+# Save files
+
+write.table(hg38.TSS.bed.pos, "hg38.TSS.bed.pos.500bp.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.TSS.bed.neg, "hg38.TSS.bed.neg.500bp.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+
+
+############ 1kb
+
+#TSS (gene length > 1kb) . Note this code is the same as the code for the boxplot
+hg38.TSS.bed.pos_1kb <- hg38.genes.pos %>% mutate(length = end - start) %>% mutate(start=as.numeric(start-1000), end=as.numeric(start+2000)) %>% filter(start>0) #%>%  filter(length>5000,length<=10000)
+hg38.TSS.bed.neg_1kb <- hg38.genes.neg %>% mutate(length = end - start) %>% mutate(start=as.numeric(end-1000), end=as.numeric(start+2000)) %>% filter(start>0)#%>%  filter(length>5000,length<=10000)
+
+# Save files
+
+write.table(hg38.TSS.bed.pos_1kb, "hg38.TSS.bed.pos.1kb.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.TSS.bed.neg_1kb, "hg38.TSS.bed.neg.1kb.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+
+```
+
+tile the region bed to 500 window (for 500bp upstream and downstream)
+
+Same code is used for the 1kb (file names 2kb because 1kb up +1kb down)
+```{bash, chipseq_makewindows.bed}
+#for TSS zoom in metagene
+
+#bedtools makewindows -b hg38.TSS.bed.pos.500bp.bed -n 500 -i winnum > hg38.genes.pos.TSS.1kb.metagene.zoomin.500w.bed 
+#bedtools makewindows -b hg38.TSS.bed.neg.500bp.bed -n 500 -i winnum -reverse > hg38.genes.neg.TSS.1kb.metagene.zoomin.500w.bed
+
+#combine the files
+#cat hg38.genes.pos.TSS.1kb.metagene.zoomin.500w.bed hg38.genes.neg.TSS.1kb.metagene.zoomin.500w.bed > hg38.genes.TSS.1kb.metagene.zoomin.500w.bed
+
+
+#sort files
+#sort -k1,1 -k2,2n hg38.genes.TSS.1kb.metagene.zoomin.500w.bed > hg38.genes.TSS.1kb.metagene.zoomin.500w.sorted.bed
+
+#for TTS zoom in metagene
+
+#bedtools makewindows -b hg38.TTS.bed.pos.500bp.bed -n 500 -i winnum > hg38.genes.pos.TTS.1kb.metagene.zoomin.500w.bed 
+#bedtools makewindows -b hg38.TTS.bed.neg.500bp.bed -n 500 -i winnum -reverse > hg38.genes.neg.TTS.1kb.metagene.zoomin.500w.bed
+
+#combine the files 
+#cat hg38.genes.pos.TTS.1kb.metagene.zoomin.500w.bed hg38.genes.neg.TTS.1kb.metagene.zoomin.500w.bed > hg38.genes.TTS.1kb.metagene.zoomin.500w.bed
+
+#sort files
+#sort -k1,1 -k2,2n hg38.genes.TTS.1kb.metagene.zoomin.500w.bed > hg38.genes.TTS.1kb.metagene.zoomin.500w.sorted.bed
+
+#get the upstream flanked for normalisation (this is because the bigwig file i am using has only been normalised by RPKM but not local signal)
+#cat hg38.pos.upstream.windows.20w.bed hg38.neg.upstream.windows.20w.bed > hg38.upstream.windows.20w.bed
+#sort -k1,1 -k2,2n hg38.upstream.windows.20w.bed > hg38.upstream.windows.20w.sorted.bed
+
+#get the downstream 5kb window for normalisation
+#cat hg38.pos.downstream.windows.20w.bed hg38.neg.downstream.windows.20w.bed > hg38.downstream.windows.20w.bed
+#sort -k1,1 -k2,2n hg38.downstream.windows.20w.bed > hg38.downstream.windows.20w.sorted.bed
+
+
+```
+
+
+Then mapped it to the bigwig files
+```{bash}
+####################################################################for the zoomed in metagene region#####################################################################
+#TSS region
+###### 500bp up- and downstream
+bedtools map -a ${OUTDIR}/hg38.genes.TSS.500bp.metagene.zoomin.500w.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.TSS.1kbzoom.500w.bed
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to 500w tiled bed (TSS) failed for ${PREFIX}" >&2
+    exit 9
+else
+    echo "mapping to 500w tiled bed (TSS) succeeded for ${PREFIX}"
+fi
+
+
+###### 1kb up- and downstream
+bedtools map -a ${OUTDIR}/hg38.genes.TSS.1kb.metagene.zoomin.500w.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.TSS.2kbzoom.500w.bed
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to 500w tiled bed (TSS) failed for ${PREFIX}" >&2
+    exit 9
+else
+    echo "mapping to 500w tiled bed (TSS) succeeded for ${PREFIX}"
+fi
+
+#upstream 5kb region for normalisation
+bedtools map -a ${OUTDIR}/hg38.upstream.windows.20w.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.upstream.20w.bed
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to 20w tiled upstream bed failed for ${PREFIX}" >&2
+    exit 9
+else
+    echo "mapping to 20w tiled upstream bed succeeded for ${PREFIX}"
+fi
+```
+
+read in all the remapped bed files with binned coverage (500win)
+```{r}
+
+#"\\_merged.TSS.1kbzoom.500w.bed"
+TSS_zoom_bed_pattern = "\\_merged.TSS.2kbzoom.500w.bed"
+
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb (modified from Andrew's code). 
+list.files(pattern = TSS_zoom_bed_pattern) %>%
+  walk(function(x) {
+    print(x)
+    
+    df <- read.table(x, header = FALSE) %>%
+      dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5) 
+   
+    # Extract prefix of filename (remove extension)
+    prefix <- str_remove(basename(x), "\\_merged.TSS.2kbzoom.500w.bed$") #change here
+    
+    # Assign individual dataframe to an object named after the prefix
+    assign(paste0(prefix, "_TSS_2kb_500w"), df, envir = .GlobalEnv) #changeh here
+  })
+
+
+upstream5kb_20w_bed_pattern = "\\_merged.upstream.20w.bed"
+
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb (modified from Andrew's code). 
+list.files(pattern = upstream5kb_20w_bed_pattern) %>%
+  walk(function(x) {
+    print(x)
+    
+    df <- read.table(x, header = FALSE) %>%
+      dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5) 
+   
+    # Extract prefix of filename (remove extension)
+    prefix <- str_remove(basename(x), "\\_merged.upstream.20w.bed$")
+    
+    # Assign individual dataframe to an object named after the prefix
+    assign(paste0(prefix, "_upstream"), df, envir = .GlobalEnv)
+  })
+```
+
+Read the TSS files, normalised to upstream 5kb (extracted seperately then map for the upstream coverage as a separte input bed file) then plot the zoomed-in metagene plot
+```{r}
+
+#list all the dataframe which I wanted to loop
+coverage_list_TSS_500w <- list(
+  D8L4Y_0h = D8L4Y_0h_TSS_2kb_500w,
+  D8L4Y_90min = D8L4Y_90min_TSS_2kb_500w,
+  D8L4Y_8h = D8L4Y_8h_TSS_2kb_500w, 
+  Input = INP_0h_TSS_2kb_500w
+)
+
+upstreamcov_list_20w <- list(
+  D8L4Y_0h = D8L4Y_0h_upstream,
+  D8L4Y_90min = D8L4Y_90min_upstream,
+  D8L4Y_8h = D8L4Y_8h_upstream,
+  Input = INP_0h_upstream
+)
+
+# Apply the same transformation to all datasets
+coverage_list_TSS_500w_adj <- lapply(coverage_list_TSS_500w, function(df) {
+  df %>% mutate(dist = (as.numeric(bin) - 250.5) * 2.004008016)
+})
+
+plot_list2 <- list()
+
+#apply normalisation to the 5kb upstream region
+for (name in names(coverage_list_TSS_500w_adj)) {
+  data <- coverage_list_TSS_500w_adj[[name]]
+  upstream <- upstreamcov_list_20w[[name]] #note that "upstream" is from a separate data
+  
+  plot_list2[[name]] <- data %>%
+    group_by(dist) %>%
+    summarise(
+      COV.mean = mean(COV),
+      SEM = sd(COV)/sqrt(n())
+    ) %>%
+    mutate(
+      Condition = name,
+      COV.fold = COV.mean / mean(upstream$COV),
+      SEM.fold = SEM / mean(upstream$COV)
+    )
+}
+
+#this normalisation method using the upstream region simulates closely to the full metagene plot normalisation (but somehow skewed the value for the TSS region and it does not match with the full metagene)
+#for (name in names(coverage_list_TSS_500w_adj)) {
+  
+  #data <- coverage_list_TSS_500w_adj[[name]]
+  #upstream <- upstreamcov_list_20w[[name]]
+  
+  # 1. group upstream by bin and get mean for each bin
+  #upstream_summary <- upstream %>%
+    #group_by(bin) %>%                     # or group_by(bin) if bin column exists
+    #summarise(
+      #upstream_mean = mean(COV),
+      #.groups = "drop"
+    #)
+  
+  # 2. use the *first upstream bin* mean as normalization factor
+  #norm_factor <- upstream_summary$upstream_mean[1]
+  
+  # 3. process downstream region
+  #plot_list2[[name]] <- data %>%
+    #group_by(dist) %>%
+    #summarise(
+      #COV.mean = mean(COV),
+      #SEM = sd(COV) / sqrt(n()),
+      #.groups = "drop"
+    #) %>%
+    #mutate(
+      #Condition = name,
+      #COV.fold = COV.mean / (norm_factor + 1),
+      #SEM.fold = SEM / (norm_factor + 1)
+    #)
+#}
+
+
+
+#combine the individual dataframes into plots
+combined.plot2 <- bind_rows(plot_list2, .id = "Sample") 
+
+#this is only to plot the 0h and 90min timepoint
+combined.plot2.partial <- combined.plot2 %>% filter(Sample !="D8L4Y_8h")
+
+#make sure the legend is in the right order
+combined.plot2$Sample <- factor(
+  combined.plot2$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min", "D8L4Y_8h", "Input")
+)
+
+
+TSS_zoom.in_plot_all <- ggplot(combined.plot2, aes(x = dist, y = COV.fold, color = Sample, fill = Sample)) +
+  geom_line(size = 1) +
+ geom_ribbon(aes(ymin = COV.fold - SEM.fold, ymax = COV.fold + SEM.fold), alpha = 0.5, color = NA) +
+  scale_x_continuous(labels = c("-2" = "-1kb", "-1" = "-500bp", "0" = "TSS", "1" = "+500bp", "2" = "+1kb")) +
+  xlab("Location") + ylab("Normalised coverage ( signal / background )") + 
+  ggtitle("Total Pol II dxchipseq TSS ± 1kb") +
+  theme_bw() +
+  scale_color_manual(values = c( "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  theme(
+    aspect.ratio = 1,
+    legend.title = element_text(size = 12), 
+    legend.text = element_text(size = 10),
+    axis.text.x = element_text(size = 11, angle = 0, vjust = 0, hjust = 0.5),
+    axis.text.y = element_text(size = 11),
+    axis.title.x = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.title.y = element_text(size = 14, face = "bold", vjust = 4),
+    plot.title = element_text(size = 16, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    legend.background = element_blank(),
+    legend.key = element_blank()
+  )
+
+
+
+#make sure the legend is in the right order
+combined.plot2.partial$Sample <- factor(
+  combined.plot2.partial$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min","Input")
+)
+
+
+
+#plot only 0h and 90mins for ~Scott's presentation (Figure 3B)
+TSS_zoom.in_plot_partial <- ggplot(combined.plot2.partial, aes(x = dist, y = COV.fold, color = Sample, fill = Sample)) +
+  geom_line(size = 0.5) +
+ geom_ribbon(aes(ymin = COV.fold - SEM.fold, ymax = COV.fold + SEM.fold), alpha = 0.5, color = NA) +
+  scale_x_continuous(labels = c("-2" = "-1kb", "-1" = "-500bp", "0" = "TSS", "1" = "+500bp", "2" = "+1kb")) +
+  xlab("Location") + ylab("Normalised coverage") + 
+  ggtitle("Total Pol II dxchipseq TSS ± 1kb") +
+   scale_color_manual(values = c( "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  theme(text = element_text(family = "sans"),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+     axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 14),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+  remove_grid()
+
+ggsave("Figure3B.pdf",
+       plot = TSS_zoom.in_plot_partial,
+       width = 3.5,
+       height = 3.5,
+       units = "in")
+```
+
+For TTS
+```{r}
+##########500bp
+#TTS (gene length > 1kb). Note this code is the one the same as below for the boxplot generation
+hg38.TTS.bed.pos <- hg38.genes.pos %>% mutate(start=as.numeric(end-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+hg38.TTS.bed.neg <- hg38.genes.neg %>% mutate(start=as.numeric(start-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+
+# Save files
+
+write.table(hg38.TTS.bed.pos, "hg38.TTS.bed.pos.500bp.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.TTS.bed.neg, "hg38.TTS.bed.neg.500bp.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+
+########1kb
+#TTS (gene length > 1kb). Note this code is the one the same as below for the boxplot generation
+hg38.TTS.bed.pos_1kb <- hg38.genes.pos %>% mutate(start=as.numeric(end-1000), end=as.numeric(start+2000)) %>% filter(start>0) 
+hg38.TTS.bed.neg_1kb <- hg38.genes.neg %>% mutate(start=as.numeric(start-1000), end=as.numeric(start+2000)) %>% filter(start>0) 
+
+# Save files
+
+write.table(hg38.TTS.bed.pos_1kb, "hg38.TTS.bed.pos.1kb.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.TTS.bed.neg_1kb, "hg38.TTS.bed.neg.1kb.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+```
+
+Read the TTS files, normalised to upstream 5kb (extracted seperately) then plot the zoomed-in metagene plot
+```{r}
+TTS_zoom_bed_pattern = "\\_merged.TTS.2kbzoom.500w.bed"
+
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb (modified from Andrew's code). 
+list.files(pattern = TTS_zoom_bed_pattern) %>%
+  walk(function(x) {
+    print(x)
+    
+    df <- read.table(x, header = FALSE) %>%
+      dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5) 
+   
+    # Extract prefix of filename (remove extension)
+    prefix <- str_remove(basename(x), "\\_merged.TTS.2kbzoom.500w.bed$")
+    
+    # Assign individual dataframe to an object named after the prefix (this will only work with "walk" as walk discards read-ins after reading)
+    assign(paste0(prefix, "_TTS_2kb_500w"), df, envir = .GlobalEnv)
+  })
+
+downstream5kb_20w_bed_pattern = "\\_merged.downstream.20w.bed"
+
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb (modified from Andrew's code). 
+list.files(pattern = downstream5kb_20w_bed_pattern) %>%
+  walk(function(x) {
+    #print(x)
+    
+    df <- read.table(x, header = FALSE) %>%
+      dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5) 
+   
+    # Extract prefix of filename (remove extension)
+    prefix <- str_remove(basename(x), "\\_merged.downstream.20w.bed$")
+    
+    # Assign individual dataframe to an object named after the prefix
+    assign(paste0(prefix, "_downstream"), df, envir = .GlobalEnv)
+  })
+
+```
+
+
+Use the same upstream normalisation
+
+```{r}
+
+#list all the dataframe which I wanted to loop
+coverage_list_TTS_500w <- list(
+  D8L4Y_0h = D8L4Y_0h_TTS_2kb_500w,
+  D8L4Y_90min = D8L4Y_90min_TTS_2kb_500w,
+  D8L4Y_8h = D8L4Y_8h_TTS_2kb_500w,
+  Input = INP_0h_TTS_2kb_500w
+)
+
+# Apply the same transformation to all datasets
+coverage_list_TTS_500w_adj <- lapply(coverage_list_TTS_500w, function(df) {
+  df %>% mutate(dist = (as.numeric(bin) - 250.5) * 2.004008016)
+})
+
+plot_list4 <- list()
+
+#apply normalisation to the 5kb downstream region
+for (name in names(coverage_list_TTS_500w_adj)) {
+  data <- coverage_list_TTS_500w_adj[[name]]
+  upstream <- upstreamcov_list_20w[[name]] #note that "upstream" is from a separate data
+  
+  plot_list4[[name]] <- data %>%
+    group_by(dist) %>%
+    summarise(
+      COV.mean = mean(COV),
+      SEM = sd(COV)/sqrt(n())
+    ) %>%
+    mutate(
+      Condition = name,
+      COV.fold = COV.mean / mean(upstream$COV),
+      SEM.fold = SEM / mean(upstream$COV)
+    )
+}
+
+#combine the individual dataframes into plots
+combined.plot4 <- bind_rows(plot_list4, .id = "Sample") 
+
+#this is only to plot the 0h and 90min timepoint
+combined.plot4.partial <- combined.plot4 %>% filter(Sample !="D8L4Y_8h")
+
+#make sure the legend is in the right order
+combined.plot4$Sample <- factor(
+  combined.plot4$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min", "D8L4Y_8h", "Input")
+)
+
+
+TTS_zoom.in_plot_all_up <- ggplot(combined.plot4, aes(x = dist, y = COV.fold, color = Sample, fill = Sample)) +
+  geom_line(size = 1) +
+ geom_ribbon(aes(ymin = COV.fold - SEM.fold, ymax = COV.fold + SEM.fold), alpha = 0.5, color = NA) +
+  scale_x_continuous(labels = c("-2" = "-1kb", "-1" = "-500bp", "0" = "TTS", "1" = "+500bp", "2" = "+1kb")) +
+  xlab("Location") + ylab("Normalised coverage ( signal / background )") + 
+  ggtitle("Total Pol II dxchipseq TTS ± 1kb") +
+  theme_bw() +
+   scale_color_manual(values = c( "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  ))+
+  theme(
+    aspect.ratio = 1,
+    legend.title = element_text(size = 12), 
+    legend.text = element_text(size = 10),
+    axis.text.x = element_text(size = 11, angle = 0, vjust = 0, hjust = 0.5),
+    axis.text.y = element_text(size = 11),
+    axis.title.x = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.title.y = element_text(size = 14, face = "bold", vjust = 4),
+    plot.title = element_text(size = 16, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    legend.background = element_blank(),
+    legend.key = element_blank()
+  )
+#this is only to plot the 0h and 90min timepoint
+combined.plot4.partial <- combined.plot4 %>% filter(Sample !="D8L4Y_8h")
+
+#make sure the legend is in the right order
+combined.plot4$Sample <- factor(
+  combined.plot4$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min", "Input")
+)
+
+
+
+#plot only 0h and 90mins for ~Scott's presentation
+#filter so it only plots 500bp plus minus range
+combined.plot4.partial.filtered <- combined.plot4.partial[combined.plot4.partial$dist >= -250 & combined.plot4.partial$dist <= 250, ]
+
+combined.plot4.partial.filtered$Sample <- factor(
+  combined.plot4.partial.filtered$Sample,
+  levels = c("D8L4Y_0h","D8L4Y_90min", "Input")
+)
+#supplementary figure 6B
+TTS_zoom.in_plot_partial_up <- ggplot(combined.plot4.partial.filtered, aes(x = dist, y = COV.fold, color = Sample, fill = Sample)) +
+  geom_line(size = 1) +
+ geom_ribbon(aes(ymin = COV.fold - SEM.fold, ymax = COV.fold + SEM.fold), alpha = 0.4, color = NA) +
+  scale_x_continuous(
+  breaks = c(-200, -100, 0, 100, 200),
+  labels = c("-500bp", "-250bp", "TTS", "+250bp", "+500bp")
+) +
+  xlab("Location") + ylab("Normalised coverage") + 
+   scale_color_manual(values = c( "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+   theme(text = element_text(family = "sans"),
+    legend.position = "none",
+    legend.text = element_text(size = 14, color = "black"),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+     axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 14),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +remove_grid()
+
+
+ggsave("Supplementary figure 6B.pdf",
+       plot = TTS_zoom.in_plot_partial_up,
+       width = 4.5,
+       height = 3.5,
+       units = "in")
+```
+
+
+---
+Pausing index analysis
+---
+First the required regions for genes longer than 1.5kb is generated, separated into the promoter regions and gene body regions as defined in Roberta's ARMC5 paper 
+https://www.sciencedirect.com/science/article/pii/S1097276524009493?via%3Dihub#sec2
+
+Genes which are too short will not have chance to observe any pausing index
+
+To determine the genes with high Pol II occupancy without excluding too many genes from the start, we start from genes whihc are more than 1kb in length
+
+```{r}
+
+#annotation file (the same as in ELOA P1)
+#hg38.gtf <- read.table("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf", header=FALSE, sep= "\t")
+
+#generate non-overlapping gene annotation (using Granges, rtracklayer , and genomicfeatures)
+#gtf.dat <- import("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf")
+#gene.gr <- gtf.dat[gtf.dat$type %in% "gene",]
+#names(gene.gr) <- gene.gr$gene_id
+#gene.gr$gene.width <- GenomicRanges::width(gene.gr)
+#gene.gr$gene_name_column <- gene.gr$gene_name
+#filter for genes longer than 1.0kb (for metagene analysis); if it's pausing index switch to 1.5kb and also change the up.ext and down.ext for the pausing index (remember this only factors for)
+
+#gene.gr already has gene width with more than 1kb (16917 entries); 1.5kb (16656 entries)
+#all are already portein codinh, non-overlapping, and from main chromosome
+
+#filter by strands, again switch back using dataframe as for the downstream window defining step GRanges will be an issue
+intervals.df_pos <- hg38.genes.pos%>% 
+                    mutate(start=as.numeric(start-500), end=as.numeric(start+1000)) %>% 
+                    filter(start>0) 
+intervals.df_neg <- hg38.genes.neg %>% 
+                    as.data.frame() %>% 
+                    mutate(start=as.numeric(end-500), end=as.numeric(start+1000)) %>% 
+                    filter(start>0) 
+#combine the pos and neg TSS dataframe into one
+intervals.df <- rbind(intervals.df_pos,intervals.df_neg) %>% dplyr::select(chr,start,end,strand,gene_name_column)
+
+#export it as bedfile and use bedtools to mak tiles (tried using R ones in TTseq but it does weird stuff so I am avoiding that)
+write.table(intervals.df, "hg38.TSS.windows.1.0kb.bed", sep = "\t",quote = F, col.names = F, row.names = F)
+
+```
+
+Using only the 0h timepoint file ie control, identify the list of genes that has higher than background coverage. and for the pausing index analysis, keep these genes .
+
+Note updated this to 0.5 so that it matches what we see in the boxplot. However, further checking the code donstream i did not include the Pol II occupancy filter in the pausing index analysis initially ( i missed this). This has now been incorporated.
+```{r}
+# Import into R
+TSS_0h_D8L4Y_POLII_high <- read.table("D8L4Y_0h_merged.clean.cov_TSS.1.0kb.bed",header=F,sep="\t") %>% 
+                          dplyr::rename("chr"= "V1", "start" = "V2", "end" = "V3", "gene_id" = "V5", 
+                                 "strand" = "V4", "coverage" = "V6")%>% 
+                          filter(coverage>0.5)
+
+# for this i define the background as 0.5, because if i set it to 5 it only have very few genes
+#using summary
+#   chr                start                end               strand            gene_id             coverage      
+# Length:16917       Min.   :    46370   Min.   :    47370   Length:16917       Length:16917       Min.   : 0.0000  
+#Class :character   1st Qu.: 31638631   1st Qu.: 31639631   Class :character   Class :character   1st Qu.: 0.1109  
+ #Mode  :character   Median : 59138975   Median : 59139975   Mode  :character   Mode  :character   Median : 0.4867  
+                    #Mean   : 74626924   Mean   : 74627924                                         Mean   : 0.7617  
+                    #3rd Qu.:111606406   3rd Qu.:111607406                                         3rd Qu.: 1.2043  
+                    #Max.   :248905696   Max.   :248906696                                         Max.   :23.6210  
+
+```
+
+Given that the median normalised coverage is approximately 0.48, I set the ones that are true signal to be anything higher than 1
+
+Now we have identified genes with high Pol II occupancy, we need to filter for genes that are longer than 1.5kb (end up using 1kb), and keep the ones which has higher pol II levels from the 1000 bp selection
+
+```{r}
+# Filter out genes smaller than 1.5kb; select high Pol II occupancy promoters (>1x background)
+
+#hg38.genes.standard.2 <- hg38.genes.standard %>% filter(length>=1500) %>% filter(gene %in% TSS_Total_high$gene_id)
+
+# Define TSS and gene body windows (note this part ties back to the beginning of the script which high pol II occupancy genes were NOT filtered - if needed this step needs to be added)
+
+hg38.TSS.bed.pos <- hg38.genes.pos %>% 
+                    mutate(start=as.numeric(start-30), end=as.numeric(start+330)) %>% 
+                    filter(start>0) 
+hg38.TSS.bed.neg <- hg38.genes.neg %>% 
+                    mutate(start=as.numeric(end-300), end=as.numeric(start+330)) %>% 
+                    filter(start>0) 
+
+hg38.gene.body.bed.pos <-hg38.genes.pos %>% 
+                          mutate(start=as.numeric(start+700)) %>% 
+                          filter(start>0) 
+hg38.gene.body.bed.neg <- hg38.genes.neg %>% 
+                          mutate(end=as.numeric(end-700)) %>% 
+                          filter(start>0) 
+
+# Merge pos and neg strand features
+
+hg38.TSS.bed <- rbind(hg38.TSS.bed.pos, hg38.TSS.bed.neg)
+hg38.gene.body.bed <- rbind(hg38.gene.body.bed.pos, hg38.gene.body.bed.neg)
+
+#export the TSS and bedfile
+write.table(hg38.TSS.bed, "hg38.TSS.windows.1.5kb.bed", sep = "\t",quote = F, col.names = F, row.names = F)
+write.table(hg38.gene.body.bed, "hg38.genebody.windows.1.5kb.bed", sep = "\t",quote = F, col.names = F, row.names = F)
+```
+
+
+remap the RPKM normalised bed onto the 1.5kb (actually 1kb) filtered TSS and gene body region.
+```{bash, chipseq_array_bigwig.sh(Part 2)}
+##############################################################  pausing index analysis ########################################################################## bedtools map -a
+
+#for filtering (1.0kb, TSS only, this is for testing and troubleshooting)
+#sort the bed files with only TSS and 1.0kb length genes , windows defining Tss is -500bp, +10000bp
+#sort -k1,1 -k2,2n ${OUTDIR}/hg38.TSS.windows.1.0kb.bed > ${OUTDIR}/hg38.TSS.windows.1.0kb.sorted.bed
+
+#map the TSS only bed to the coverage files, this is to identify high POL II occupancy regions
+#bedtools map -a ${OUTDIR}/hg38.TSS.windows.1.0kb.sorted.bed -b ${OUTDIR}/upstreamnorm_bigwig/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_TSS.1.0kb.bed
+
+
+# Check for errors
+#if [ $? -ne 0 ]; then
+    #echo "mapping to tiled gtf failed for pausing index cov (TSS 1.0kb) use ${PREFIX}" >&2
+    #exit 10
+#else
+    #echo "mapping to tiled gtf succeeded for pausing index cov (TSS 1.0kb)use ${PREFIX}"
+#fi
+
+#post high Pol II occupancy filtering, 1.5kb genes (TSS and gene body)
+#sort the bed files with only TSS and 1.5kb length genes , windows defining Tss is -500bp, +10000bp
+#sort -k1,1 -k2,2n ${OUTDIR}/hg38.TSS.windows.1.5kb.bed > ${OUTDIR}/hg38.TSS.windows.1.5kb.sorted.bed
+#sort -k1,1 -k2,2n ${OUTDIR}/hg38.genebody.windows.1.5kb.bed > ${OUTDIR}/hg38.genebody.windows.1.5kb.sorted.bed
+
+#map the TSS only bed to the coverage files
+bedtools map -a ${OUTDIR}/hg38.TSS.windows.1.5kb.sorted.bed -b ${OUTDIR}/upstreamnorm_bigwig/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_TSS.1.5kb.bed
+
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to gtf failed for pausing index cov (TSS 1.0kb)use ${PREFIX}" >&2
+    exit 11
+else
+    echo "mapping to gtf succeeded for pausing index cov (TSS 1.0kb) use ${PREFIX}"
+fi
+
+
+#map the genebody only bed to the coverage files
+bedtools map -a ${OUTDIR}/hg38.genebody.windows.1.5kb.sorted.bed -b ${OUTDIR}/upstreamnorm_bigwig/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_genebody.1.5kb.bed
+
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to gtf failed for pausing index cov (genebody 1.0kb)use ${PREFIX}" >&2
+    exit 12
+else
+    echo "mapping to tiled gtf succeeded for pausing index cov (genebody 1.0kb) use ${PREFIX}"
+fi
+
+
+```
+
+read in all the remapped bed files with binned coverage
+```{r}
+
+#read in all TSS an individual dataframe
+TSS_bed_pattern = "\\TSS\\.1.5kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected
+
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosomee
+TSS_dfs_norm2 <- list.files(pattern = TSS_bed_pattern) %>%
+  map(function(x) {
+    print(x)
+    
+    df2 <- read.table(x, header = FALSE) %>%
+      dplyr::rename(
+        "chr" = V1,
+        "start" = V2,
+        "end" = V3,
+        "length" = V4,
+        "COV" = V30,
+        "gene_id" =V10,
+        "gene_name" = V12
+      ) %>% 
+      dplyr::mutate(
+        region = "TSS",
+        condition = str_remove(basename(x), "_merged\\.clean\\.cov.*$")
+      ) 
+    
+    # Use condition as-is
+    condition_name <- unique(df2$condition)
+    upstream <- upstreamcov_list_20w[[condition_name]] #use the same upstream normalisation as the metagene zoom in plots (this avoids having to intrenally regenerate another version of normalised bigwigs)
+    
+    if (!is.null(upstream)) {
+      upstream_mean <- mean(upstream$COV, na.rm = TRUE)
+      df2 <- df2 %>%
+        dplyr::mutate(
+          COV.fold = COV / upstream_mean
+        )
+    } else {
+      warning(paste("No upstream coverage found for", condition_name))
+    }
+    
+    return(df2)
+  }) %>%
+  bind_rows() %>% 
+  mutate(match = paste0(condition,"_", gene_id)) %>% 
+  filter(gene_name %in% TSS_0h_D8L4Y_POLII_high$gene_id)
+
+
+
+
+#50751 entries for TSS;  merged_TSS %>% distinct(match) %>% count () = 50751 (this is not filtered for High Pol II occupancy)
+#read in all genebody as iindividual dataframe
+
+genebody_bed_pattern = "\\genebody.1.5kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected
+
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome
+genebody_dfs_norm2 <- list.files(pattern = genebody_bed_pattern) %>%
+  map_dfr(function(x) {
+    print(x)
+    
+    df3 <- read.table(x, header = FALSE) %>%
+      dplyr::rename(
+        "chr" = V1,
+        "start" = V2,
+        "end" = V3,
+        "length" = V4,
+        "COV" = V30,
+        "gene_id" = V10,
+        "gene_name" = V12# adjust if coverage is in a different column
+      ) %>% 
+      dplyr::mutate(
+        region = "GeneBody",
+        condition = str_remove(basename(x), "_merged\\.clean\\.cov.*$")
+      )
+    
+    # Use condition as-is
+    condition_name <- unique(df3$condition)
+    upstream <- upstreamcov_list_20w[[condition_name]] #use the same upstream normalization as the metagene zoom in plots (this avoids having to internally regenerate another version of normalised bigwigs)
+    
+    if (!is.null(upstream)) {
+      upstream_mean <- mean(upstream$COV, na.rm = TRUE)
+      df3 <- df3 %>%
+        dplyr::mutate(
+          COV.fold = COV / upstream_mean
+        )
+    } else {
+      warning(paste("No upstream coverage found for", condition_name))
+    }
+    
+    return(df3)
+  }) %>%
+  bind_rows()%>% 
+  mutate(match = paste0(condition,"_", gene_id))%>% filter(gene_name %in% TSS_0h_D8L4Y_POLII_high$gene_id)
+
+
+#before renormalising using upstream normalisation with deeptools normalisation factor; same after renormalisation just to make sure nothing changed
+#seems like pausing index analysis is pretty robust
+#50751 entries for gene body; merged_genebody%>% distinct(match) %>% count () = 50751 (this is without filtering for high Pol II occupancy)
+
+#need to make sure the total number of entries matches before merging and calculating
+```
+
+Combine the gene body and TSS dataframe into one and start calculating the pausing index
+
+```{r}
+merged_dfs2 <- left_join(TSS_dfs_norm2 ,genebody_dfs_norm2 , by = "match")
+
+#need cleaning up because it messes with the cumulative distribution calculation
+merged_dfs_clean2 <- merged_dfs2 %>%
+  filter(!is.na(COV.x), !is.na(COV.y)) %>%
+  filter(COV.x > 0, COV.y > 0)
+
+#49669
+
+merged_dfs_grouped2 <- merged_dfs_clean2 %>%
+  dplyr::select(1:5, gene_name.x, COV.x, COV.y, condition.x) %>%
+  dplyr::rename(
+    TSS       = COV.x,
+    gene.body = COV.y,
+    condition = condition.x,
+    gene.name = gene_name.x
+  ) %>%
+  group_by(gene.name, condition) %>%
+  summarise(
+    TSS        = mean(TSS, na.rm = TRUE),        # average across duplicates
+    gene.body  = mean(gene.body, na.rm = TRUE),  # average across duplicates
+    ratio      = log2(TSS / gene.body),
+    .groups    = "drop"
+  ) %>%
+  group_by(condition) %>%
+  mutate(ecdf_value = ecdf(ratio)(ratio)) %>%
+  ungroup()
+
+#checkpoint:check if te effective cummulation is done correctly (the 0 coverage values will affect the effective cumulation calculation)
+merged_dfs_grouped2 %>%
+  summarise(min_ecdf = min(ecdf_value), max_ecdf = max(ecdf_value))
+```
+
+plot the results
+ 
+ 
+```{r}
+
+#make sure the legend is in the right order
+merged_dfs_grouped2$condition <- factor(
+merged_dfs_grouped2$condition,
+  levels = c("D8L4Y_0h", "D8L4Y_90min", "D8L4Y_8h")
+)
+
+#export data with gene name for Roberta
+readr::write_csv(merged_dfs_grouped2, "pausing_index_degronScott_list.csv")
+#plot the pausing index
+ratio_plot <- ggplot(merged_dfs_grouped2 , aes(x = ratio, y = ecdf_value, color = condition)) +
+  geom_step(size=1) + 
+  scale_x_continuous(limits = c(-3, 6),  
+                     breaks = c( 0, 2, 4,6)) +
+  #scale_color_manual(values = colors) +
+  scale_y_continuous(labels = scales::percent_format()) + 
+  labs(
+    x = "log2(Pausing index)",
+    y = "Percentage of Genes",
+    title = "",
+    color = "Condition"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 16, color = "black"),
+    axis.title.x = element_text(size = 16, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14),
+    panel.grid = element_blank(), 
+    axis.ticks = element_line(color = "black") 
+  ) +
+  geom_hline(yintercept = 0, color = "black", size = 1) + 
+  geom_vline(xintercept = -8, color = "black", size = 1)
+```
+ 
+ 
+ calculate pausing index but with absolute value
+ 
+```{r}
+merged_dfs_grouped_abs2 <- merged_dfs_clean2 %>%
+  dplyr::select(1:5, gene_name.x, COV.x, COV.y, condition.x) %>%
+  dplyr::rename(
+    TSS       = COV.x,
+    gene.body = COV.y,
+    condition = condition.x,
+    gene.name = gene_name.x
+  ) %>%
+  group_by(gene.name, condition) %>%
+  summarise(
+    TSS        = mean(TSS, na.rm = TRUE),        # average across duplicates
+    gene.body  = mean(gene.body, na.rm = TRUE),  # average across duplicates
+    ratio      = TSS / gene.body,
+    .groups    = "drop"
+  ) %>%
+  group_by(condition) %>%
+  mutate(ecdf_value = ecdf(ratio)(ratio)) %>%
+  ungroup()
+
+#checkpoint:check if te effective cummulation is done correctly (the 0 coverage values will affect the effective cumulation calculation)
+merged_dfs_grouped_abs2 %>%
+  summarise(min_ecdf = min(ecdf_value), max_ecdf = max(ecdf_value))
+```
+ 
+ plot the results for the absolute value of pausing index 
+ 
+ 
+```{r}
+
+#make sure the legend is in the right order
+merged_dfs_grouped_abs2$condition <- factor(
+merged_dfs_grouped_abs2$condition,
+  levels = c("D8L4Y_0h", "D8L4Y_90min", "D8L4Y_8h")
+)
+
+#export data with gene name for Roberta
+#readr::write_csv(merged_dfs_grouped, "pausing_index_degronScott_list.csv")
+#plot the pausing index
+ratio_plot_abs <- ggplot(merged_dfs_grouped_abs2 , aes(x = ratio, y = ecdf_value, color = condition)) +
+  geom_step(size=1) + 
+  scale_x_continuous(limits = c(-10, 20),  
+                     breaks = c( 0, 10, 20)) +
+  #scale_color_manual(values = colors) +
+  scale_y_continuous(labels = scales::percent_format()) + 
+  labs(
+    x = "Pausing index",
+    y = "Percentage of Genes",
+    title = "",
+    color = "Condition"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 16, color = "black"),
+    axis.title.x = element_text(size = 16, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14),
+    panel.grid = element_blank(), 
+    axis.ticks = element_line(color = "black") 
+  ) +
+  geom_hline(yintercept = 0, color = "black", size = 1) + 
+  geom_vline(xintercept = -8, color = "black", size = 1)
+
+
+#zoom in to the region where the separation of the curve begins to the early point of saturation
+ratio_plot_abs_zoomin <- ggplot(merged_dfs_grouped_abs , aes(x = ratio, y = ecdf_value, color = condition)) +
+  geom_step(size=1) + 
+  scale_x_continuous(limits = c(2, 12),  
+                     breaks = c( 2,4,6,8,10,12)) +
+  #scale_color_manual(values = colors) +
+  scale_y_continuous(labels = scales::percent_format()) + 
+  labs(
+    x = "Pausing index",
+    y = "Percentage of Genes",
+    title = "",
+    color = "Condition"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 16, color = "black"),
+    axis.title.x = element_text(size = 16, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14),
+    panel.grid = element_blank(), 
+    axis.ticks = element_line(color = "black") 
+  ) +
+  geom_hline(yintercept = 0, color = "black", size = 1) + 
+  geom_vline(xintercept = -8, color = "black", size = 1)
+
+```
+
+---
+Generate the data required for boxplot by TSS, GB, and TTS
+---
+ 
+For this part of the data, coverage are calculated respectively for TSS, GB and TTS for each gene
+
+Use gene length > 1000 bp for TSS and TTS; and gene body use gene length > 5000 for  this data
+
+```{r}
+#TSS (gene length > 1kb)
+hg38.TSS.bed.pos <- hg38.genes.pos %>% mutate(start=as.numeric(start-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+hg38.TSS.bed.neg <- hg38.genes.neg %>% mutate(start=as.numeric(end-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+#hg38.TSS.bed.pos <- hg38.genes.standard.2  %>% filter(strand=="+") %>% mutate(start=as.numeric(start-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+#hg38.TSS.bed.neg <- hg38.genes.standard.2  %>% filter(strand=="-") %>% mutate(start=as.numeric(end-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+#combined TSS
+hg38.TSS.bed <- rbind(hg38.TSS.bed.pos,hg38.TSS.bed.neg)
+
+#TTS (gene length > 1kb)
+hg38.TTS.bed.pos <- hg38.genes.pos %>% mutate(start=as.numeric(end-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+hg38.TTS.bed.neg <- hg38.genes.neg %>% mutate(start=as.numeric(start-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+
+#hg38.TTS.bed.pos <- hg38.genes.standard.2  %>% filter(strand=="+") %>% mutate(start=as.numeric(end-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+#hg38.TTS.bed.neg <- hg38.genes.standard.2  %>% filter(strand=="-") %>% mutate(start=as.numeric(start-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+
+#combined TTS
+hg38.TTS.bed <- rbind(hg38.TTS.bed.pos, hg38.TTS.bed.neg)
+
+#gene body (gene length > 5kb), with 2kb from the start and end of the gene excluded
+hg38.gene.body.pos <- hg38.genes.pos.5kb %>% mutate(start=as.numeric(start+2000), end=as.numeric(end-2000)) %>% filter(start>0) 
+hg38.gene.body.neg <- hg38.genes.neg.5kb %>% mutate(start = as.numeric(start-2000),end   = as.numeric(end+2000)) %>% filter(start>0) 
+
+#combined gene body
+hg38.gene.body <- rbind(hg38.gene.body.pos,hg38.gene.body.neg)
+
+options(scipen = 999)  # avoid scientific notation
+#need the upstream region coverage to use it for normalisation
+hg38.upstream.bed.pos <-  hg38.genes.pos %>% mutate(start=as.numeric(start-5000), end=as.numeric(start+200)) %>% filter(start>0) 
+hg38.upstream.bed.neg <- hg38.genes.neg %>% mutate(start=as.numeric(end+5000), end=as.numeric(start+200)) %>% filter(start>0) 
+
+#hg38.upstream.bed.pos <- hg38.genes.standard.2  %>% filter(strand=="+") %>% mutate(start=as.numeric(start-5000), end=as.numeric(start+200)) %>% filter(start>0) 
+#hg38.upstream.bed.neg <- hg38.genes.standard.2  %>% filter(strand=="-") %>% mutate(start=as.numeric(end+4800), end=as.numeric(start+200)) %>% filter(start>0) 
+#combined data for upstream region
+hg38.upstream.bed <- rbind(hg38.upstream.bed.pos,hg38.upstream.bed.neg)
+#Save files
+write.table(hg38.TSS.bed, "hg38.TSS.boxplot.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.TTS.bed , "hg38.TTS.boxplot.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.gene.body, "hg38.gene.body.boxplot.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.upstream.bed, "hg38.upstream.boxplot.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+```
+
+Map directly onto TSS,GB and TTS to acquire the coverage (see chipseq_array_bigwig.sh) using the upstream normalised bigwig ie the files with (samplename).RPKM.upstreamnorm.50nt.bw
+```{bash, chipseq_array_bigwig.sh}
+###################### Mapping to TSS, GB and TTS for boxplot ###############################################
+#reactivate the correct environment for the correct analysis
+#conda activate bigwigmerge 
+#sort the bed files of separate TSS, GB and TTS
+
+#TSS
+sort -k1,1 -k2,2n ${OUTDIR}/hg38.TSS.boxplot.bed > ${OUTDIR}/hg38.TSS.boxplot.sorted.bed
+
+#Gene Body (GB)
+sort -k1,1 -k2,2n ${OUTDIR}/hg38.gene.body.boxplot.bed > ${OUTDIR}/hg38.gene.body.boxplot.sorted.bed
+
+#TTS
+sort -k1,1 -k2,2n ${OUTDIR}/hg38.TTS.boxplot.bed > ${OUTDIR}/hg38.TTS.boxplot.sorted.bed
+
+
+#upstream region for normalisation
+sort -k1,1 -k2,2n ${OUTDIR}/hg38.upstream.boxplot.bed > ${OUTDIR}/hg38.upstream.boxplot.sorted.bed
+
+#map the TSS only bed to the coverage files
+bedtools map -a ${OUTDIR}/hg38.TSS.boxplot.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_TSS.1.0.boxplot.renorm.bed
+
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to TSS region failed for ${PREFIX}" >&2
+    exit 13
+else
+    echo "mapping to TSS region succeeded for  ${PREFIX}"
+fi
+
+
+#map the gene body only bed to the coverage files
+bedtools map -a ${OUTDIR}/hg38.gene.body.boxplot.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph  -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_gb.1.0.boxplot.renorm.bed
+
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to genebody region failed for ${PREFIX}" >&2
+    exit 14
+else
+    echo "mapping to gene body region succeeded for  ${PREFIX}"
+fi
+
+#map the TTS only bed to the coverage files
+bedtools map -a ${OUTDIR}/hg38.TTS.boxplot.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph  -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_TTS.1.0.boxplot.renorm.bed
+
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to TTS region failed for ${PREFIX}" >&2
+    exit 15
+else
+    echo "mapping to TTS region succeeded for  ${PREFIX}"
+fi
+
+#mapping the upstream region so this can be used for downstream normalisation
+#map the TTS only bed to the coverage files
+bedtools map -a ${OUTDIR}/hg38.upstream.boxplot.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_upstream.1.0.boxplot.renorm.bed
+
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to upstream region failed for ${PREFIX}" >&2
+    exit 16
+else
+    echo "mapping to upstream region succeeded for  ${PREFIX}"
+fi
+```
+
+read in the mapped coverage files by TSS, GB and TTS
+
+check for threshold of high Pol II occupancy
+
+```{r, filter for high Pol II occuoancy}
+TSS_0h_D8L4Y_POLII_TSS_boxplot <- read.table("D8L4Y_0h_merged.clean.cov_TSS.1.0.boxplot.bed",header=F,sep="\t") %>% 
+                          dplyr::rename("chr"= "V1", "start" = "V2", "end" = "V3", "gene_id" = "V10", 
+                                 "strand" = "V4", "coverage" = "V30", "hgnc_symbol" = "V12") %>% 
+                        dplyr::select(chr ,start,end, strand, gene_id, hgnc_symbol, coverage) 
+TSS_0h_D8L4Y_POLII_upstream_boxplot <- read.table("D8L4Y_0h_merged.clean.cov_upstream.1.0.boxplot.bed",header=F,sep="\t") %>% 
+                          dplyr::rename("chr"= "V1", "start" = "V2", "end" = "V3", "gene_id" = "V10", 
+                                 "strand" = "V4", "coverage" = "V30", "hgnc_symbol" = "V12") %>% 
+                        dplyr::select(chr ,start,end, strand, gene_id, hgnc_symbol, coverage)
+
+#filter for high Pol II occupancy greater than 1 fold ie. log2FC > 0.5. which is kept consistent as the pausing index analysis
+TSS_0h_D8L4Y_POLII_high_boxplot_list <- left_join(TSS_0h_D8L4Y_POLII_TSS_boxplot, TSS_0h_D8L4Y_POLII_upstream_boxplot,by = "gene_id") %>% 
+                                        dplyr::select(hgnc_symbol.x, coverage.x , coverage.y) %>% dplyr::rename( hgnc_symbol = "hgnc_symbol.x", TSS_coverage = "coverage.x", upstream_coverage = "coverage.y")%>%   
+                                        mutate(ctrl0h.coverage.fold=log2(TSS_coverage/mean(upstream_coverage)) ) %>% filter(ctrl0h.coverage.fold > 0.5)
+#8976
+```
+
+column names to include:
+gene_id	hgnc_symbol	condition	coverage	dataset	target
+
+For this dataset target is total pol II
+```{r}
+#read in all TSS an individual dataframe
+cov_boxplot_pattern = "1.0\\.boxplot\\.bed$"
+
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome
+
+cov_boxplot_dfs_norm <- list.files(pattern = cov_boxplot_pattern) %>%
+  map(function(x) {
+    print(x)
+    dataset_type <- str_extract(x, "TSS|TTS|gb|upstream")
+    dataset_type <- recode(dataset_type, gb = "Gene Body")
+    
+    # Read bed file
+    df3 <- read.table(x, header = FALSE) %>% 
+      dplyr::rename("chr" = V1, "start" = V2, "end" = V3,
+                    "bin" = V4, "coverage" = V30,
+                    "gene_id" = V10, "hgnc_symbol" = V12) %>% 
+      dplyr::filter(hgnc_symbol %in% TSS_0h_D8L4Y_POLII_high_boxplot_list$hgnc_symbol) %>%
+      dplyr::mutate(dataset = dataset_type,
+                    condition = str_remove(basename(x), "_merged\\.clean\\.cov.*$"),
+                    target = "Total Pol II")
+    
+    # --- Apply upstream normalisation ---
+    condition_name <- unique(df3$condition)
+    upstream <- upstreamcov_list_20w[[condition_name]] #includes the same upstream normalisation used in the zoomed in metagene plots
+    
+    if (!is.null(upstream)) {
+      upstream_mean <- mean(upstream$COV, na.rm = TRUE)
+      df3 <- df3 %>%
+        dplyr::mutate(
+          coverage.fold = coverage / upstream_mean
+        )
+    } else {
+      warning(paste("No upstream coverage found for", condition_name))
+    }
+    
+    return(df3)
+  }) %>%
+  bind_rows() %>%dplyr::filter(dataset != "upstream")
+
+
+#export the csv for Scott
+write_csv(cov_boxplot_dfs_norm, "Degron_PolII_merged_cov_boxplot.csv")
+
+
+```
+
+
+Plot the boxplot
+```{r}
+cov_boxplot_dfs_norm$dataset <- factor(
+  cov_boxplot_dfs_norm$dataset, 
+  levels = c("TSS", "Gene Body", "TTS")
+)
+
+cov_boxplot_dfs_norm$condition <- factor(
+  cov_boxplot_dfs_norm$condition, 
+  levels = c("D8L4Y_0h", "D8L4Y_90min", "D8L4Y_8h")
+)
+
+# Create boxplots with normalised coverage
+Total_plot <- ggplot(cov_boxplot_dfs_norm, aes(x = condition, y = coverage.fold, fill = condition)) +
+  geom_boxplot(position = position_dodge(0.7), outlier.shape = NA) + 
+  theme_minimal() +
+  labs(
+    title = "",
+    x = "",
+    y = "Normalised total Pol II coverage (5kb upstream)"
+  ) +
+  theme(
+    strip.text.x = element_text(size = 12, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  facet_wrap(~ dataset, scales = "fixed", ncol = 3) +
+  coord_cartesian(ylim = c(0, 20))  # Adjust y-limit for normalized data
+  
+
+
+
+```
+
+
+---
+Generate pausing ratio csv files with relevant metadata
+---
+
+
+This csv file combines pausing ratio information along with metadata from the analysis such as basemean (samples of 90min and 0h and 8h and 0h are calculated separately as we treat it as different analysis), gene length, promoter coordinate, promoter type and gene biotype
+```{r}
+pausingratio_csv <- merged_dfs_clean %>%
+  dplyr::select(1:5, gene_id.x,V12.x, COV.x, COV.y, condition.x, V14.x) %>%
+  dplyr::rename(
+    TSS       = COV.x,
+    gene.body = COV.y,
+    condition = condition.x,
+    gene.name = V12.x,
+    biotype = V14.x,
+    length = length.x,
+    chr = chr.x,
+    start = start.x,
+    end = end.x,
+    strand = V5.x,
+    gene_id = gene_id.x
+  ) %>%
+  group_by(gene.name, condition) %>%
+  mutate(
+    TSS        = mean(TSS, na.rm = TRUE),       # average across duplicates (just to deal with dupicated netries if any, but if have replicates, include rep in conditions)
+    gene.body  = mean(gene.body, na.rm = TRUE), # average across duplicates(just to deal with dupicated netries if any, but if have replicates, include rep in conditions)
+    pausing_ratio      = TSS / gene.body,
+    log2_pausing_ratio = log2(pausing_ratio)
+  ) %>%
+  ungroup()
+
+
+
+pausingratio_csv <- pausingratio_csv %>% rename(gene_name = gene.name ) %>%
+  mutate(baseMean_90min_0h = results_90minvs0h$baseMean[match(gene_name, results_90minvs0h$gene_name)])
+
+pausingratio_csv <- pausingratio_csv  %>% mutate(baseMean_8h_0h = results_8hvs0h$baseMean[match(gene_name, results_8hvs0h$gene_name)])
+
+#add promoter informatiom
+# First, enumerate promoters per gene in all_promoters
+all_promoters_enum <- all_promoters %>%
+  group_by(gene.name) %>%
+  mutate(promoter_index = row_number()) %>%
+  ungroup() %>%
+  mutate(promoter_coordinate = paste0(chr, ":", start, "-", end))
+
+# Then join with pausingratio_csv
+pausingratio_csv_expanded <- pausingratio_csv %>% rename(gene.name=gene_name) %>%
+  left_join(all_promoters_enum %>%select(gene.name, promoter_type, promoter_index, promoter_coordinate), by = "gene.name") %>%
+  mutate(
+    promoter_type = ifelse(is.na(promoter_type),
+                           "no promoter information",
+                           promoter_type)
+  ) %>%
+  select(-chr, -start, -end, -strand) %>%
+  # Optionally, create columns like promoter_1, promoter_2, etc.
+  pivot_wider(
+    id_cols = everything() %>% setdiff(c("promoter_index", "promoter_coordinate", "promoter_type")),
+    names_from = promoter_index,
+    values_from = c(promoter_type,promoter_coordinate),
+    names_glue = "{.value}_{promoter_index}"
+  ) %>% select(-promoter_coordinate_NA)
+
+#export the file as CSV
+write_csv(pausingratio_csv_expanded, "Degron_PolII_pausing_ratio_with_metatadata_ENSGid.csv") 
+
+```
+
+
+---
+stratified data base on Figure 3C histogram
+---
+The dataset which was used by Scott and Alex to plot the histogram were:Degron_PolII_merged_cov_boxplot.csv/cov_boxplot_dfs_norm
+
+To address the reviewer's comments:divide the TSS histogram reads by quartile(log2FC), stratified by pausing index, intron numbers, gene length
+```{r}
+
+boxplot_90min_vs0h_hit_df <- cov_boxplot_dfs_norm %>% dplyr::select(gene_id,hgnc_symbol,dataset, condition,coverage.fold)  %>% filter(condition != "D8L4Y_8h") %>%
+  pivot_wider(
+    names_from = condition,
+    values_from = coverage.fold
+  ) %>%
+  filter(dataset != "TTS") %>%
+  # calculate log2 fold change
+  mutate(
+    log2FC = log2((D8L4Y_90min) / (D8L4Y_0h))
+  )
+
+#regenerate the histogram to match what Scott and Alex have generated
+hist_figure3C <- ggplot(boxplot_90min_vs0h_hit_df, aes(x = log2FC, fill = dataset)) +
+  geom_histogram(
+    binwidth = 0.02,
+    alpha = 0.5,
+    position = "identity"
+  ) +
+  theme_bw() +
+  labs(
+    title = "log2FC (90min / 0h): TSS vs Gene Body",
+    x = "log2 Fold Change",
+    y = "Gene Count",
+    fill = "Feature"
+  ) + scale_y_continuous(limits = c(0,600))
+
+hist_figure3C
+
+```
+Now select only TSS since it showed the shift
+
+```{r}
+hist_quartile_df <- boxplot_90min_vs0h_hit_df %>% filter(dataset == "TSS") %>%  mutate(
+    quartile = ntile(log2FC, 4)
+  ) %>% filter(!is.na(log2FC)) %>%
+  filter(!is.na(quartile))
+
+hist_quartile_df  %>%
+  mutate(
+    quartile = cut_number(log2FC, 4, labels = FALSE) )%>% group_by(quartile) %>% tally()
+
+## A tibble: 4 × 2
+#  quartile     n
+#     <int> <int>
+#1        1  2463
+#2        2  2462
+#3        3  2462
+#4        4  2462
+
+#seelct only the 0h sample because the basemean for 90min vs 0h is the same for 0h and 90 mins, but not the pausing ratio. this is to allow left join
+pausingratio_csv_expanded_0h_baseline <-pausingratio_csv_expanded %>% 
+  filter(condition == "D8L4Y_0h") %>% 
+  dplyr::select(gene.name, length,pausing_ratio, 
+                log2_pausing_ratio, baseMean_90min_0h,
+                promoter_type_NA,
+                promoter_type_1,promoter_type_2,
+                promoter_type_3,promoter_type_4) %>%  
+  distinct(gene.name, .keep_all = TRUE)
+
+metadata_hist_quartile_df <- hist_quartile_df %>%
+  left_join(pausingratio_csv_expanded_0h_baseline,
+            by = c("hgnc_symbol" = "gene.name")) %>%  mutate(length_category = case_when(
+    length >= 1000  & length < 5000  ~ "1_5kb",
+    length >= 5000  & length < 10000 ~ "5_10kb",
+    length >= 10000 & length < 25000 ~ "10_25kb",
+    length >= 25000 & length < 50000 ~ "25_50kb",
+    length >= 50000 & length < 75000 ~ "50_75kb",
+    length >= 75000 ~ "75kb_plus",
+    TRUE ~ NA_character_
+  ))
+
+
+```
+
+Plot the different categories
+```{r}
+
+#length by quartile
+length_plot_q_df <- metadata_hist_quartile_df %>% group_by(quartile, length_category) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(quartile) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup()
+
+length_q_plot <- ggplot(length_plot_q_df, aes(x = factor(quartile), y = prop, fill = length_category)) +
+  geom_bar(stat = "identity") +
+  theme_bw() +
+  labs(
+    x = "log2FC Quartile",
+    y = "Proportion of genes",
+    fill = "Gene length", title ="gene length categories across log2FC quartiles (TSS)"
+  )
+
+
+#generate the boxplot for length
+length_q_boxplot <-ggplot(metadata_hist_quartile_df, aes(x = factor(quartile), y = log2(length))) +
+  geom_boxplot(fill = "steelblue", alpha = 0.6, outlier.alpha = 0.3) +
+  theme_bw() +
+  labs(
+    x = "log2FC Quartile",
+    y = "log2 Gene length",
+    title = "Gene length across quartiles"
+  )
+
+
+legend_table <- data.frame(
+  log2_bp = c(10, 12, 14, 16, 18),
+  kb = c("~1 kb", "~4 kb", "~16 kb", "~64 kb", "~256 kb")
+)
+
+table_grob <- gridExtra::tableGrob(legend_table, rows = NULL)
+
+length_q_boxplot_labelled <- length_q_boxplot +wrap_elements(table_grob)
+
+#log2 pausing ratio
+pausing_ratio_q_plot <- ggplot(metadata_hist_quartile_df,
+       aes(x = factor(quartile), y = log2_pausing_ratio)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.6, outlier.alpha = 0.3) +
+  theme_classic() +
+  labs(
+    x = "log2FC Quartile",
+    y = "log2 Pausing Ratio",
+    title = "Pausing across log2FC quartiles (TSS)"
+  )
+
+
+
+#baseMean expression
+baseMean_q_plot <-ggplot(metadata_hist_quartile_df,
+       aes(x = factor(quartile), y = log2_pausing_ratio)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.6, outlier.alpha = 0.3) +
+  theme_classic() +
+  labs(
+    x = "log2FC Quartile",
+    y = "basemean expression",
+    title = "baseMeanExpression across log2FC quartiles (TSS)"
+  )
+
+#promoter type
+
+prom_long <- metadata_hist_quartile_df %>%
+  pivot_longer(
+    cols = starts_with("promoter_type"),
+    names_to = "promoter_class",
+    values_to = "promoter_type"
+  ) %>%
+  filter(!is.na(promoter_type))
+
+
+prom_summary <- prom_long %>%
+  group_by(quartile, promoter_type) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(quartile) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup()
+
+prom_q_plot <- ggplot(prom_summary, aes(x = factor(quartile), y = prop, fill = promoter_type)) +
+  geom_bar(stat = "identity") +
+  theme_classic() +
+  labs(
+    x = "log2FC Quartile",
+    y = "Proportion of genes",
+    fill = "Promoter type",
+    title = "Promoter architecture across quartiles (TSS)"
+  )
+
+library(patchwork)
+
+#combine the plots together
+(baseMean_q_plot +
+ pausing_ratio_q_plot +
+ prom_q_plot +
+ length_q_plot +
+ length_q_boxplot +
+ wrap_elements(table_grob)) +
+  plot_layout(ncol = 2)
+```
+
