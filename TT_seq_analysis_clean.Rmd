@@ -1,0 +1,829 @@
+---
+title: "TT-seq"
+output: html_document
+date: "2025-07-18"
+---
+read the required counts data
+
+```{r}
+#load required libraries
+library(tidyverse)
+library(readr)
+library(dplyr)
+library(ggpubr)
+library(purrr)
+library(stringr)
+#read in all summary count files 
+count_data_pattern = "\\.txt"
+
+
+Degron_count_data <- list.files(path = "/Users/png/Desktop/ATV_lab_projects/Degron_RPB1_project_collab/counts/",
+                         pattern = count_data_pattern, full.names = TRUE) %>%
+    map(function(x) {print(x)
+        readr::read_table(x, col_names = F, skip =2)}
+        ) %>% purrr::reduce(right_join,c("X1","X2", "X3","X4", "X5", "X6")) %>% 
+    dplyr::rename(gene_id= "X1", chrom = "X2", start = "X3", end = "X4", strand = "X5", length = "X6")  %>%
+    rename_with(~str_replace(list.files(path = "/Users/png/Desktop/ATV_lab_projects/Degron_RPB1_project_collab/counts/",
+                         pattern = count_data_pattern) , "_ensembl_featureCounts\\..*", ""), 7:15)
+
+```
+
+Perform Deseq2 normalisation for the dataset. 
+```{r}
+library(DESeq2)
+library(tidyverse)
+#clean up the counts files
+Degron_counts_df <- Degron_count_data %>%
+  mutate(gene_id = ifelse(grepl("_sacCer3", chrom), paste0(gene_id, "_sacCer3"), gene_id)) %>%
+    dplyr::select('gene_id',
+           7:15) %>% 
+          column_to_rownames('gene_id') 
+
+#generate metadata
+Degron_metadata <- data.frame(sample = colnames(Degron_counts_df[1:9]), 
+                         group = c(rep("0h", 3), rep("8h", 3), rep("90min", 3)) )    
+#make sure group is a factor
+Degron_metadata$group<-as.factor(Degron_metadata$group)
+```
+
+Read in counts as Deseq object
+```{r}
+dds_Degron <- DESeqDataSetFromMatrix(countData=Degron_counts_df, 
+                              colData=Degron_metadata, 
+                              design= ~group)
+
+
+#dds$group <- relevel(dds$group, ref = "ctrl")
+#dds$group <- factor(dds$group, levels = c("ctrl","VEGF", "VEGFDMFu", "DMFu"))
+#standard workflow ie estimate dispersion, estimate size factor and wald test for DE
+
+# Identify the spike-in genes subsets
+control_genes_Degron <- grepl("sacCer3$", rownames(dds_Degron))
+# Estimate size factors (factoring in the spike in)
+dds_Degron <- estimateSizeFactors(dds_Degron, controlGenes = control_genes_Degron)
+
+#export size factor to be used in normalising reads for coverage computation
+
+Degron_sizeFactors <- dds_Degron$sizeFactor %>% as.data.frame() %>% rownames_to_column()
+write_csv(Degron_sizeFactors, "Degron_TTseq.Deseq2.sizefactors.csv", col_names = FALSE)
+
+#if need to do filtering can do after estimate sizafactor
+#for DEG between KO and WT, I filtered away the ones with low counts
+keep_Degron <- rowSums(counts(dds_Degron)) >= 10
+dds_Degron <- dds_Degron[keep_Degron,]
+```
+
+
+Remove the spike-in yeast genes from the data before the next step
+```{r}
+#remove the spike-ins from the dataset before continue-ing
+exclude_genes_Degron <- grepl("sacCer3$", rownames(dds_Degron))
+
+#subset the DESeqDataSet object to exclude these genes
+dds_filtered_Degron <- dds_Degron[!exclude_genes_Degron,]
+
+#quick check of the genes being removed from dds
+#rownames(dds)[exclude_genes]
+```
+
+
+Plot PCA plots for all samples
+
+```{r}
+#specify the "group" variable for colData(dds) as the variable for intgroup
+intgroup_Degron <- "group"
+
+# Transform the data using rlog transformation (using only genes from hg38)
+rlog_Degron <- rlogTransformation(dds_filtered_Degron)
+
+
+
+# Create PCA plot (all samples together)
+Degron_PCA_plot <-  plotPCA(rlog_Degron, intgroup = intgroup_Degron) + 
+             theme_bw() +
+             theme(
+             axis.title = element_text(size = 14),  # Adjust the font size for axis titles
+             axis.text = element_text(size = 14),   # Adjust the font size for axis text
+             legend.title = element_text(size = 14),# Adjust the font size for legend title
+             legend.text = element_text(size = 14), 
+             aspect.ratio = 1  # Adjust the font size for legend text
+            ) + ggtitle("Degron_PCA plot combined using only top n =500 variance")
+
+#using ntop=500 top features by variance (only hg38 genes)
+
+#separate data by ELOA KO and Wt
+# Perform PCA on rlog-transformed data
+Degron_pca_result <- prcomp(t(assay(rlog_Degron)))  # Transpose to get samples as rows
+
+# Get PCA coordinates (PC1, PC2, etc.)
+Degron_pca_data <- as.data.frame(Degron_pca_result$x)
+
+# Create a new metadata column based on sample names
+Degron_pca_data$Sample <- colnames(rlog_Degron)  # Sample names
+Degron_pca_data$Group <- ifelse(grepl("^0h_", Degron_pca_data$Sample), 
+                                "0h", 
+                                ifelse(grepl("^8h_", Degron_pca_data$Sample), 
+                                       "8h", 
+                                       "90min"))
+Degron_pca_data$Group <- factor(Degron_pca_data$Group, levels = c("0h", "90min", "8h"))
+# Calculate the variance explained by each principal component
+Degron_var_explained <- summary(Degron_pca_result)$importance[2, ] * 100 
+
+
+Degron_pca_data$Group <- factor(Degron_pca_data$Group, 
+                                     levels = c("0h", "90min", "8h"))
+# plot PCA (ggplot2)
+Degron_PCA_plot_group <- ggplot(Degron_pca_data, aes(x = PC1, y = PC2, colour = Group)) +
+  geom_point(size = 3, alpha = 0.5) +
+  labs(title = "PCA Plot", x = "PC1", y = "PC2") +
+  theme_bw() +
+  labs(
+    title = "PCA Plot",
+    x = paste0("PC1 (", round(Degron_var_explained[1], 2), "%)"),  # PC1 variance explained
+    y = paste0("PC2 (", round(Degron_var_explained[2], 2), "%)")   # PC2 variance explained
+  ) 
+
+
+```
+
+
+---
+Metagene plot analysis
+---
+
+Generate non-overlapping annotations for make windows. Use only genes > 1000 to minimise noise in the metagene plot.
+
+```{r}
+library(GenomicRanges)
+library(rtracklayer)
+#annotation file (the same as in ELOA P1)
+#hg38.gtf <- read.table("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf", header=FALSE, sep= "\t")
+
+#generate non-overlapping gene annotation (using Granges, rtracklayer , and genomicfeatures)
+gtf.dat <- import("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf")
+gene.gr <- gtf.dat[gtf.dat$type %in% "gene",]
+names(gene.gr) <- gene.gr$gene_id
+gene.gr$gene.width <- GenomicRanges::width(gene.gr)
+gene.gr$gene_name_column <- gene.gr$gene_name
+
+gene.gr <- gene.gr[width(gene.gr) >1000]
+gene.gr <- gene.gr[gene.gr$gene_biotype %in% "protein_coding"]
+gene.gr <- gene.gr[countOverlaps(gene.gr,gene.gr) == 1]
+gene.gr <- keepSeqlevels(gene.gr,c(as.character(1:22),"X","Y"),pruning.mode="coarse")
+#convert to dataframe from this step 9Granges can be problematic)
+hg38.genes <- as.data.frame(gene.gr) %>% 
+              dplyr::rename("chr" = "seqnames") %>% 
+              mutate(chr = paste0("chr", chr, "_hg38")) %>%
+              mutate(start = start - 1) %>%
+              mutate(length=end-start) 
+#16,917
+
+
+# Select pos/neg strand genes; define flanking regions 
+#middle region of the metagene plot (redo using filtered bed)
+hg38.genes.bed.pos.mid.windows <- hg38.genes %>% 
+                                  filter(strand=="+") %>% 
+                                  dplyr::select(chr, start, end, length)
+
+hg38.genes.bed.neg.mid.windows <- hg38.genes %>% 
+                                  filter(strand=="-") %>% 
+                                  dplyr::select(chr, start, end, length)
+
+#flanking regions of the metagene plot (pre-TSS)
+hg38.genes.bed.pos.early.windows <- hg38.genes %>% 
+                                    filter(strand=="+") %>% 
+                                    mutate(start=start-5000,end=start+5000) %>% 
+                                    dplyr::select(chr, start, end, length) %>% 
+                                    filter(start>0)
+
+
+hg38.genes.bed.neg.early.windows <- hg38.genes  %>% 
+                                    filter(strand=="-") %>%
+                                    mutate(start=start-5000,end=start+5000) %>%
+                                    dplyr::select(chr, start, end, length) %>% 
+                                    filter(start>0)
+
+#flanking regions of the metagene plot (post-TES)
+hg38.genes.bed.pos.late.windows <- hg38.genes  %>% 
+                                   filter(strand=="+") %>% 
+                                   mutate(start=end,end=start+5000) %>% 
+                                   dplyr::select(chr, start, end, length) 
+
+
+hg38.genes.bed.neg.late.windows <- hg38.genes  %>% 
+                                   filter(strand=="-") %>% 
+                                   mutate(start=end,end=start+5000) %>% 
+                                   dplyr::select(chr, start, end, length)
+
+
+# Save files
+
+write.table(hg38.genes.bed.pos.mid.windows, "hg38.genes.fil1000.pos.mid.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.bed.neg.mid.windows, "hg38.genes.fil1000.neg.mid.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+write.table(hg38.genes.bed.pos.early.windows, "hg38.genes.fil1000.pos.early.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.bed.neg.early.windows, "hg38.genes.fil1000.neg.early.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+write.table(hg38.genes.bed.pos.late.windows, "hg38.genes.fil1000.pos.late.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.bed.neg.late.windows, "hg38.genes.fil1000.neg.late.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+ 
+```
+Generate non-overlapping annotations for make windows. 
+
+```{r}
+library(GenomicRanges)
+library(rtracklayer)
+#annotation file (the same as in ELOA P1)
+#hg38.gtf <- read.table("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf", header=FALSE, sep= "\t")
+
+#generate non-overlapping gene annotation (using Granges, rtracklayer , and genomicfeatures)
+gtf.dat <- import("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf")
+gene.gr.all <- gtf.dat[gtf.dat$type %in% "gene",]
+names(gene.gr.all) <- gene.gr.all$gene_id
+gene.gr.all$gene.width <- GenomicRanges::width(gene.gr.all)
+gene.gr.all$gene_name_column <- gene.gr.all$gene_name
+
+#gene.gr <- gene.gr[width(gene.gr) >1000]
+gene.gr.all <- gene.gr.all[gene.gr.all$gene_biotype %in% "protein_coding"]
+gene.gr.all <- gene.gr.all[countOverlaps(gene.gr.all,gene.gr.all) == 1]
+gene.gr.all <- keepSeqlevels(gene.gr.all,c(as.character(1:22),"X","Y"),pruning.mode="coarse")
+#convert to dataframe from this step 9Granges can be problematic)
+hg38.genes.all <- as.data.frame(gene.gr.all) %>% 
+              dplyr::rename("chr" = "seqnames") %>% 
+              mutate(chr = paste0("chr", chr, "_hg38")) %>%
+              mutate(start = start - 1) %>%
+              mutate(length=end-start) 
+#16,917 (> 1kb), 17,268 (all gene length)
+
+
+# Select pos/neg strand genes; define flanking regions 
+#middle region of the metagene plot (redo using filtered bed)
+hg38.genes.bed.pos.mid.windows.all <- hg38.genes.all %>% 
+                                  filter(strand=="+") %>% 
+                                  dplyr::select(chr, start, end, length)
+
+hg38.genes.bed.neg.mid.windows.all <- hg38.genes.all %>% 
+                                  filter(strand=="-") %>% 
+                                  dplyr::select(chr, start, end, length)
+
+#flanking regions of the metagene plot (pre-TSS)
+hg38.genes.bed.pos.early.windows.all <- hg38.genes.all %>% 
+                                    filter(strand=="+") %>% 
+                                    mutate(start=start-5000,end=start+5000) %>% 
+                                    dplyr::select(chr, start, end, length) %>% 
+                                    filter(start>0)
+
+
+hg38.genes.bed.neg.early.windows.all <- hg38.genes.all  %>% 
+                                    filter(strand=="-") %>%
+                                    mutate(start=start-5000,end=start+5000) %>%
+                                    dplyr::select(chr, start, end, length) %>% 
+                                    filter(start>0)
+
+#flanking regions of the metagene plot (post-TES)
+hg38.genes.bed.pos.late.windows.all <- hg38.genes.all  %>% 
+                                   filter(strand=="+") %>% 
+                                   mutate(start=end,end=start+5000) %>% 
+                                   dplyr::select(chr, start, end, length) 
+
+
+hg38.genes.bed.neg.late.windows.all <- hg38.genes.all  %>% 
+                                   filter(strand=="-") %>% 
+                                   mutate(start=end,end=start+5000) %>% 
+                                   dplyr::select(chr, start, end, length)
+
+
+# Save files
+
+write.table(hg38.genes.bed.pos.mid.windows.all, "hg38.genes.pos.mid.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.bed.neg.mid.windows.all, "hg38.genes.neg.mid.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+write.table(hg38.genes.bed.pos.early.windows, "hg38.genes.pos.early.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.bed.neg.early.windows, "hg38.genes.neg.early.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+write.table(hg38.genes.bed.pos.late.windows, "hg38.genes.pos.late.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.bed.neg.late.windows, "hg38.genes.neg.late.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+ 
+```
+
+After splitting the bed files using bedtools makewindow as per the original script (bedtools_makewindows_**.sh). Correct the bed files (so the positives and negatives matches) before mapping it to the blacklist. The mapping to the blacklist-cleaned reads should be done using bash on cluster (bedsort first)
+
+
+
+```{bash, bedtools_makewindows.sh}
+#tile the bed files 
+#bedtools makewindows -b hg38.genes.pos.mid.windows.bed -n 60 -i winnum > hg38.genes.pos.mid.windows.60w.bed
+#bedtools makewindows -b hg38.genes.neg.mid.windows.bed -n 60 -i winnum -reverse > hg38.genes.neg.mid.windows.60w.bed
+
+#bedtools makewindows -b hg38.genes.pos.early.windows.bed -n 20 -i winnum > hg38.genes.pos.early.windows.20w.bed
+#bedtools makewindows -b hg38.genes.neg.early.windows.bed -n 20 -i winnum -reverse > hg38.genes.neg.early.windows.20w.bed
+
+#bedtools makewindows -b hg38.genes.pos.late.windows.bed -n 20 -i winnum > hg38.genes.pos.late.windows.20w.bed
+#bedtools makewindows -b hg38.genes.neg.late.windows.bed -n 20 -i winnum -reverse > hg38.genes.neg.late.windows.20w.bed
+
+#ignore the fail error message which says that there will be one line where the start > end. the code will still generate the output
+```
+
+
+Import and adjust window numbers for metagene
+```{r}
+
+hg38.genes.bed.pos.mid.windows.all <- read.table("hg38.genes.pos.mid.windows.60w.bed",header=F) %>% 
+                                  mutate(V4=V4+20) 
+
+hg38.genes.bed.neg.mid.windows.all <- read.table("hg38.genes.neg.mid.windows.60w.bed",header=F) %>% 
+                                  mutate(V4=V4+20) 
+
+hg38.genes.bed.pos.early.windows.all <- read.table("hg38.genes.pos.early.windows.20w.bed",header=F) 
+
+hg38.genes.bed.neg.early.windows.all <- read.table("hg38.genes.neg.early.windows.20w.bed",header=F) %>% 
+                                    mutate(V4=V4+80)  
+
+hg38.genes.bed.pos.late.windows.all <- read.table("hg38.genes.pos.late.windows.20w.bed",header=F) %>%
+                                   mutate(V4=V4+80) 
+
+hg38.genes.bed.neg.late.windows.all <- read.table("hg38.genes.neg.late.windows.20w.bed",header=F) 
+
+# Combine the corrected bed files 
+hg38.genes.corrected.all.bed <- rbind(hg38.genes.bed.pos.early.windows.all, hg38.genes.bed.pos.mid.windows.all, hg38.genes.bed.pos.late.windows.all,hg38.genes.bed.neg.early.windows.all, hg38.genes.bed.neg.mid.windows.all, hg38.genes.bed.neg.late.windows.all)
+hg38.genes.pos.corrected.all.bed <- rbind(hg38.genes.bed.pos.early.windows.all, hg38.genes.bed.pos.mid.windows.all, hg38.genes.bed.pos.late.windows.all)
+hg38.genes.neg.corrected.all.bed <- rbind(hg38.genes.bed.neg.early.windows.all, hg38.genes.bed.neg.mid.windows.all, hg38.genes.bed.neg.late.windows.all)
+
+# Save files
+write.table(hg38.genes.corrected.all.bed, "hg38.transcripts.corrected.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.pos.corrected.all.bed, "hg38.transcripts.pos.corrected.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.genes.neg.corrected.all.bed, "hg38.transcripts.neg.corrected.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+```
+
+
+---
+Spike-in normalised metagene plot
+---
+lot the metagene plot using spike-in normalisation factor bigwigs
+Once completed the mapping of the coverage onto the binned genome regions (in bed format), generate the plot (code from Ivan)
+
+
+```{r}
+
+
+### Plot 
+
+# Define sample names and corresponding file prefixes
+samples <- c("0h", "90min", "8h")
+prefixes <- c("0h", "90min", "8h")
+
+# Initialize empty list to store plot data frames
+plot_list_si <- list()
+
+for(i in seq_along(samples)) {
+  sample_name <- samples[i]
+  prefix <- prefixes[i]
+  
+  # Read forward and reverse coverage files and combine
+  coverage <- rbind(
+    read.table(paste0(prefix, "_spikein.norm._merged_hg38_fwd.clean.cov.bed"), header = FALSE),
+    read.table(paste0(prefix, "_spikein.norm._merged_hg38_rev.clean.cov.bed"), header = FALSE)
+  )
+  
+  # Rename columns
+  colnames(coverage) <- c("chr", "start", "end", "bin", "COV")
+  
+  # Add dist column
+  coverage <- coverage %>%
+    mutate(dist = (as.numeric(bin) - 1) * 0.0505050505)
+  
+  # Summarise mean and SEM by dist
+  plot_df <- coverage %>%
+    group_by(dist) %>%
+    summarise(
+      COV.mean = mean(COV),
+      SEM = sd(COV)/sqrt(n())
+    ) %>%
+    mutate(Condition = case_when(
+      sample_name == "0h" ~ "0h",
+      sample_name == "90min" ~ "90min",
+      sample_name == "8h" ~ "8h"
+    ))
+  
+  # Store result in list
+  plot_list_si[[sample_name]] <- plot_df
+}
+
+# Combine all plot data frames
+Total_genes.plot.si <- bind_rows(plot_list_si)
+#only 0h and 90mins
+
+Total_genes.plot.si_part <- Total_genes.plot.si %>% filter(Condition != "8h")
+# Formatting for better aesthetics
+
+Total_genes.plot.si$Condition <- factor(Total_genes.plot.si$Condition, 
+                                     levels = c("0h", "90min", "8h"))
+
+Total_genes.plot.si_part$Condition <- factor(Total_genes.plot.si_part$Condition, 
+                                     levels = c("0h", "90min"))
+#Plot the metagene plot
+TT_metagene_si_p <- Total_genes.plot.si %>%
+  ggplot(aes(x = dist, y = COV.mean, color = Condition, fill = Condition)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = COV.mean - SEM, ymax = COV.mean + SEM), alpha = 0.2, color = NA) +
+  #scale_color_manual(values = colors) +
+  #scale_fill_manual(values = colors) +
+  #scale_linetype_manual(values = line_types) + # Add this to set linetypes
+  scale_x_continuous(breaks = seq(0, 5, by = 1), 
+                     labels = c("0" = "-5kb", "1" = "TSS", "2" = "33%", "3" = "66%", "4" = "TTS", "5" = "+5kb")) +
+  scale_y_continuous(limits = c(0,25))+
+  guides(linetype = guide_legend(override.aes = list(fill = NA))) + # Adjust the legend for linetypes
+  xlab("Position") + ylab("Spike-in normalised coverage") + 
+  ggtitle("") +
+  theme_bw() +
+  theme(
+    #aspect.ratio = 1,
+    legend.title = element_text(size = 14, face = "bold"), 
+    legend.text = element_text(size = 10),
+    axis.text.x = element_text(size = 11, angle = 0, vjust = 0, hjust = 0.5),
+    axis.text.y = element_text(size = 11),
+    axis.title.x = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.title.y = element_text(size = 14, face = "bold", vjust = 2),
+    plot.title = element_text(size = 16, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    legend.background = element_blank(),
+    legend.key = element_blank()
+  ) +
+  guides(fill = "none") + ggtitle("TT-seq metagene plot for non-overlapping all gene length (spike-in normalised)") # Hide the fill legend
+
+
+#Figure 3F
+TT_metagene_si_p_part <- Total_genes.plot.si_part %>%
+  ggplot(aes(x = dist, y = COV.mean, color = Condition, fill = Condition)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = COV.mean - SEM, ymax = COV.mean + SEM), alpha = 0.2, color = NA) +
+  #scale_color_manual(values = colors) +
+  #scale_fill_manual(values = colors) +
+  #scale_linetype_manual(values = line_types) + # Add this to set linetypes
+  scale_x_continuous(breaks = seq(0, 5, by = 1), 
+                     labels = c("0" = "-5kb", "1" = "TSS", "2" = "33%", "3" = "66%", "4" = "TTS", "5" = "+5kb")) +
+  scale_y_continuous(limits = c(0,25), breaks= c(0, 10, 20))+
+  guides(linetype = guide_legend(override.aes = list(fill = NA))) + # Adjust the legend for linetypes
+  xlab("Position") + ylab("Spike-in normalised coverage") + 
+  ggtitle("") +
+  scale_color_manual(values = c( "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+ theme(text = element_text(family = "sans"),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+     axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 14),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+  guides(fill = "none")  # Hide the fill legend
+
+ggsave("Figure3F.pdf",
+       plot = TT_metagene_si_p_part,
+       width = 4.5,
+       height = 3.5,
+       units = "in")
+```
+
+---
+Extended analysis: further filtering by expression levels
+---
+compute baseMean and RPKM per group for data inspection
+```{r}
+#extract basemean
+
+# get normalized counts
+# normalized counts from your dds
+norm_counts <- counts(dds_filtered_Degron, normalized=TRUE) %>%as.data.frame()
+
+# get the condition info for each column
+sample_info <- colData(dds_filtered_Degron)
+
+# calculate group-wise mean normalized counts
+
+baseMean_by_group <- 
+  norm_counts %>%
+  tibble::rownames_to_column("gene") %>%
+  tidyr::pivot_longer(-gene, names_to="sample", values_to="norm_count") %>%
+  left_join(data.frame(sample=rownames(sample_info),
+                       condition=sample_info$group),
+            by="sample") %>%
+  group_by(gene, condition) %>%
+  summarise(baseMean=mean(norm_count), .groups="drop") %>%
+  tidyr::pivot_wider(names_from=condition, values_from=baseMean) %>% 
+  rename(`0h` ="0h_avg_baseMean",  `8h` = "8h_avg_baseMean", `90min` = "90min_avg_baseMean")
+
+#> summary(baseMean_by_group)
+     #gene                 0h                  8h                90min          
+ #Length:30506       Min.   :     0.00   Min.   :     0.00   Min.   :     0.00  
+ #Class :character   1st Qu.:     4.64   1st Qu.:     5.40   1st Qu.:     4.73  
+ #Mode  :character   Median :    34.19   Median :    41.91   Median :    36.28  
+                    #Mean   :   949.38   Mean   :  1138.81   Mean   :   948.95  
+                    #3rd Qu.:   559.27   3rd Qu.:   655.14   3rd Qu.:   564.50  
+                    #Max.   :104236.74   Max.   :135689.65   Max.   :105605.61  
+
+##get RPKM by Group
+
+counts <- counts(dds_filtered_Degron) 
+
+# total library size per sample
+lib_sizes <- colSums(counts)
+
+# keep only rows that are genes
+genes_gtf <- gtf.dat[gtf.dat$type == "gene"]
+# width gives the length of each gene
+gene_lengths <- width(genes_gtf)
+
+# assign gene IDs as names
+names(gene_lengths) <- genes_gtf$gene_id
+
+# match your count rownames (gene IDs) to gene lengths
+gene_lengths_matched <- gene_lengths[rownames(counts)]
+
+#use sweep to preserve gene names
+rpkm <- sweep(counts, 2, lib_sizes, FUN = function(x, lib) x * 1e9 / (gene_lengths_matched * lib)) %>% 
+        as.data.frame() 
+
+
+sample_info_df <- sample_info %>% as.data.frame()
+
+
+#generate RPKM by group
+rpkm_by_group <- 
+  rpkm %>%
+  rownames_to_column("gene") %>%
+  pivot_longer(-gene, names_to="sample", values_to="RPKM") %>%
+  left_join(
+    sample_info_df %>%
+      dplyr::select(sample, group), 
+    by="sample"
+  ) %>%
+  group_by(gene, group) %>%
+  summarise(meanRPKM=mean(RPKM), .groups="drop") %>%
+  pivot_wider(names_from=group, values_from=meanRPKM) %>% 
+  rename(`0h` ="0h_avg_RPKM",  `8h` = "8h_avg_RPKM", `90min` = "90min_avg_RPKM")
+
+#> summary(rpkm_by_group)
+#     gene                 0h                  8h                90min          
+# Length:30506       Min.   :   0.0000   Min.   :   0.0000   Min.   :   0.0000  
+# Class :character   1st Qu.:   0.0103   1st Qu.:   0.0105   1st Qu.:   0.0108  
+# Mode  :character   Median :   0.1167   Median :   0.1196   Median :   0.1212  
+                    #Mean   :   0.9300   Mean   :   1.0008   Mean   :   0.9495  
+                    #3rd Qu.:   0.7869   3rd Qu.:   0.7723   3rd Qu.:   0.7862  
+                    #Max.   :1066.7297   Max.   :1244.8831   Max.   :1120.2572
+
+```
+Combine the RPKM and baseMeantable together
+
+```{r}
+#clean up the genes data
+genes_gtf_clean <- genes_gtf %>% as.data.frame() %>% rename("gene_id" = "gene") %>% select("gene", "gene_name", "gene_biotype")
+
+#combine the data together with gene name and gene biotype information
+final_data <- left_join(rpkm_by_group,baseMean_by_group, by = "gene") %>% 
+  left_join(genes_gtf_clean, by = "gene") %>% 
+  select("gene", "gene_name", "gene_biotype", `0h_avg_RPKM` ,`8h_avg_RPKM`, `90min_avg_RPKM` ,`0h_avg_baseMean` ,`8h_avg_baseMean` ,`90min_avg_baseMean`)
+
+write_csv(final_data, "Degron_Scott_genes_RPKM_baseMean.csv")
+```
+
+
+Generate the boxplot for basemean
+
+```{r}
+#convert into long format, then calculate the log2baseMean
+log2baseMean_long <- baseMean_by_group %>% 
+                      pivot_longer(!gene, names_to = "Condition", values_to = "baseMean") %>% 
+                      mutate(log2baseMean = log2(baseMean)) %>% 
+                      mutate(Condition = str_extract(Condition, "^[^_]+")) #clean up the suffixes
+
+#reordering the levels of the conditions
+log2baseMean_long$Condition <- factor(log2baseMean_long$Condition, 
+                                     levels = c("0h", "90min", "8h"))
+#plot the log2basemean boxplot
+baseMean_boxplot <- ggplot(log2baseMean_long, aes(x = Condition, y = log2baseMean, fill = Condition)) +
+  geom_boxplot(outlier.shape = NA) +
+  theme_minimal() +
+  #coord_cartesian(ylim = c(0,2)) +
+  labs(x = "", y = "log2baseMean") +
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 16),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 12),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 12),
+    axis.ticks.y = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 1)
+  ) 
+
+```
+
+---
+Differential expression analysis
+---
+
+Perform differential expression analysis
+
+
+No differential expression of genes observed. However, interestingly we do see the general shift of transcription to be lower ie closer to 0 in the 90min vs 0h in MA plot, vs 8h vs 0h MA plot
+```{r}
+
+res <- DESeq(dds_filtered_Degron)
+#perform lfcshirnkage to reduce noise (cannot use alpgem as in Jespers paper as the model struggle t5o fiy)
+resLFC_8hvs0h <- lfcShrink(res, coef="group_8h_vs_0h", type="ashr")
+
+#> summary(resLFC_8hvs0h)
+
+#out of 30506 with nonzero total read count
+#adjusted p-value < 0.1
+#LFC > 0 (up)       : 0, 0%
+#LFC < 0 (down)     : 0, 0%
+#outliers [1]       : 2, 0.0066%
+#low counts [2]     : 0, 0%
+#(mean count < 1)
+#[1] see 'cooksCutoff' argument of ?results
+#[2] see 'independentFiltering' argument of ?results
+#[1] "Intercept"         "group_8h_vs_0h"    "group_90min_vs_0h"
+
+time8hvs0h_res <- results(res, name="group_8h_vs_0h")
+time90minvs0h_res <- results(res, name="group_90min_vs_0h")
+resLFC_90minvs0h <- lfcShrink(res, coef="group_90min_vs_0h", type="ashr")
+#> summary(time8hvs0h_res)
+#out of 30506 with nonzero total read count
+#adjusted p-value < 0.1
+#LFC > 0 (up)       : 0, 0%
+#LFC < 0 (down)     : 0, 0%
+#outliers [1]       : 2, 0.0066%
+#low counts [2]     : 0, 0%
+#(mean count < 1)
+#[1] see 'cooksCutoff' argument of ?results
+#[2] see 'independentFiltering' argument of ?results
+
+
+#> summary(resLFC_90minvs0h)
+
+#out of 30506 with nonzero total read count
+#adjusted p-value < 0.1
+#LFC > 0 (up)       : 0, 0%
+#LFC < 0 (down)     : 0, 0%
+#outliers [1]       : 2, 0.0066%
+#low counts [2]     : 0, 0%
+#(mean count < 1)
+#[1] see 'cooksCutoff' argument of ?results
+#[2] see 'independentFiltering' argument of ?results
+#> summary(time90minvs0h_res)
+
+#out of 30506 with nonzero total read count
+#adjusted p-value < 0.1
+#LFC > 0 (up)       : 0, 0%
+#LFC < 0 (down)     : 0, 0%
+#outliers [1]       : 2, 0.0066%
+#low counts [2]     : 0, 0%
+#(mean count < 1)
+#[1] see 'cooksCutoff' argument of ?results
+#[2] see 'independentFiltering' argument of ?results
+
+```
+
+
+plot volcano plot
+```{r}
+time90minvs0h_res
+# Prepare data
+time90minvs0h_res_df <- time90minvs0h_res %>%
+  as.data.frame() %>%
+  mutate(
+    neglog10p = -log10(pvalue),
+    Status = ifelse(!is.na(padj) & padj < 0.05,
+                         "Significant",
+                         "Not Significant")
+  )
+
+
+# Volcano plot
+ggplot(time90minvs0h_res_df , aes(x = log2FoldChange, y = neglog10p)) +
+  geom_point(aes(color = Status), alpha = 0.6, size = 1.5) +
+  scale_color_manual(values = c("grey", "red")) +
+  theme_minimal() +
+  geom_vline(xintercept = c(-1.5, 1.5),
+             linetype = "dotted",
+             linewidth = 0.7) +
+  labs(
+    x = "log2 Fold Change (90min vs 0h)",
+    y = "-log10(p-value)",
+    title = "Volcano Plot: 90min vs 0h (by padj cut-off 0.05)"
+  ) 
+
+
+#export the data as csv
+gene_names_df <- gtf.dat %>% as_tibble() %>% select(gene_id, gene_name) %>% distinct_all()
+
+time90minvs0h_res_df2 <- time90minvs0h_res_df %>% rownames_to_column("gene_id") %>% select(-fdrtool_qval) %>% left_join(gene_names_df, by = "gene_id") %>% select(gene_id, gene_name, everything())
+
+write_csv(time90minvs0h_res_df2, "DeSeq2_results_90minvs0h.csv")
+```
+
+
+Generate the MA plot overlaying with density map 
+```{r}
+plotMA(time8hvs0h_res, ylim=c(-2,2)) + title ("8h vs 0h MA plot")
+plotMA(time90minvs0h_res, ylim=c(-2,2))+ title ("90min vs 0h MA plot")
+
+
+#include the density plot to show where most of the reads are concentrated
+
+library(MASS)      # for kde2d
+library(ggplot2)
+library(ggdag)
+library(patchwork)
+
+
+#time8hvs0h_res
+# prepare data
+res_df <- as.data.frame(time8hvs0h_res)
+res_df <- res_df[!is.na(res_df$log2FoldChange) & !is.na(res_df$baseMean), ]
+res_df$logBaseMean <- log10(res_df$baseMean + 1)
+
+# compute 2D density
+dens <- MASS::kde2d(res_df$logBaseMean, res_df$log2FoldChange, n = 200)
+MAplot_density_8hvs0h <- ggplot(res_df, aes(x = logBaseMean, y = log2FoldChange)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "grey") +
+  stat_density_2d(aes(fill = ..level.., alpha = ..level..), geom = "polygon", contour = TRUE,bins = 20) +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
+  scale_fill_viridis_c(option = "magma", name = "Density") +
+  scale_alpha(range = c(0.2, 1.0), guide = "none") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme_minimal() +
+  labs(x = "log10(baseMean + 1)", y = "log2 Fold Change", 
+       title = "8h vs 0h MA plot with density") + remove_grid()
+
+#time90minvs0h_res
+
+# prepare data
+res_df2 <- as.data.frame(time90minvs0h_res)
+res_df2 <- res_df2[!is.na(res_df2$log2FoldChange) & !is.na(res_df2$baseMean), ]
+res_df2$logBaseMean <- log10(res_df2$baseMean + 1)
+
+# compute 2D density (Figure 3E)
+dens2 <- MASS::kde2d(res_df2$logBaseMean, res_df2$log2FoldChange, n = 200)
+MAplot_density_90minvs0h <- ggplot(res_df2, aes(x = logBaseMean, y = log2FoldChange)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "grey") +
+  stat_density_2d(aes(fill = ..level.., alpha = ..level..), geom = "polygon", contour = TRUE,bins = 20) +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "black") +
+  scale_fill_viridis_c(option = "magma", name = "Density") +
+  scale_alpha(range = c(0.2, 0.8), guide = "none") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme_minimal() +
+  labs(x = "log10(mean expression)", y = "log2 Fold Change") + 
+  theme(text = element_text(family = "sans"),
+    legend.position = "right",
+    legend.text = element_text(size = 14, color = "black"),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+     axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 14),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +remove_grid()
+
+
+ggsave("Figure3E.pdf",
+       plot = MAplot_density_90minvs0h,
+       width = 4.5,
+       height = 3.5,
+       units = "in")
+#use patchwork to combine the plots together
+combined_MAdensity_plot <- MAplot_density_90minvs0h + MAplot_density_8hvs0h 
+```
+
+for the MA plots
+If log10(baseMean + 1) ≈ 3.5, then
+
+baseMean ≈ 3161
+
+
+
+
