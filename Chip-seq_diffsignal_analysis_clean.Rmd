@@ -943,3 +943,505 @@ saveRDS(df_genebody_8h, "df_genebody_8h.rds")
 # readr::write_tsv(df_genebody_8h_out, "xchip_8h_gene_body.tsv")
 ```
 
+
+FDR does not give any significant regions. Under a coordinated global shift, the signal may be spread across many features rather than concentrated in a subset of highly significant responders. Standard FDR correction controls false discoveries at the individual-feature level and can therefore have limited sensitivity for detecting broad, low-amplitude changes
+
+So to overcome this, we generate a significance score metric, combing log2FC and pvalue to evalue the significance of differential signal of Pol II.
+Significance Score=∣logFC∣×(−log10​(PValue)) - no directions
+Signed Significance Score=logFC×(−log10​(PValue))
+
+read in the 90mins TSS files
+```{r}
+diffsig_tss_90min <- readRDS("df_tss_90min.rds")
+#diffsig_tss_90min$signed_significance_score <- sign(diffsig_tss_90min$logFC) * (-log10(diffsig_tss_90min$PValue))
+
+#only annotate the significant ones based on new rank
+diffsig_tss_90min <- diffsig_tss_90min %>%
+  dplyr::mutate(
+    signed_significance_score = ifelse(
+      PValue < 0.05,
+      sign(logFC) * (-log10(PValue)),
+      NA
+    )
+  )
+
+```
+
+find overlaps with what genes are these
+```{r}
+library(GenomicRanges)
+library(rtracklayer)
+# Convert your TSS table to GRanges
+tss_90_gr <- GRanges(
+  seqnames = sub(":.*", "", diffsig_tss_90min$range),
+  ranges = IRanges(
+    start = as.numeric(sub(".*:", "", sub("-.*", "", diffsig_tss_90min$range))),
+    end = as.numeric(sub(".*-", "", diffsig_tss_90min$range))
+  )
+)
+
+# Find overlaps
+hits_tss_90min <- findOverlaps(tss_90_gr, gene.gr )
+
+# Add gene information
+diffsig_tss_90min$gene_id <- NA
+diffsig_tss_90min$gene_name <- NA
+
+diffsig_tss_90min$gene_id[queryHits(hits_tss_90min)] <- gene.gr$gene_id[subjectHits(hits_tss_90min)]
+diffsig_tss_90min$gene_name[queryHits(hits_tss_90min)] <- gene.gr$gene_name[subjectHits(hits_tss_90min)]
+
+#export the output for the data
+write_csv(diffsig_tss_90min, "diffsig_tss_90min_significant_score_metadata.csv")
+```
+regenerate the MA plot with the new significance score rank
+
+```{r}
+ggplot(diffsig_tss_90min, aes(x = logCPM, y = logFC)) +
+
+  # Points coloured by signed significance score
+  geom_point(
+    aes(color = signed_significance_score),
+    alpha = 0.7,
+    size = 0.8
+  ) +
+
+  geom_hline(
+    yintercept = 0,
+    linetype = "dotted",
+    color = "black"
+  ) +
+
+  scale_color_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    na.value = "grey80",
+    name = "Signed\nsignificance score"
+  ) +
+
+  scale_y_continuous(
+    limits = c(-2, 2)
+  ) +
+
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+
+  labs(
+    x = "logCPM",
+    y = "log2 Fold Change",
+    title = "Differential signal TSS MA plot with signed significance score (90 min vs 0 h)"
+  ) +
+
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    hjust = 1.1,
+    vjust = 1.5,
+    label = paste0(
+      "P-value < 0.05 windows: ",
+      sum(diffsig_tss_90min$PValue < 0.05, na.rm = TRUE),
+      " / ",
+      nrow(diffsig_tss_90min),
+      "\n",
+      "P-value < 0.05 genes: ",
+      length(unique(
+        diffsig_tss_90min$gene_name[
+          diffsig_tss_90min$PValue < 0.05
+        ]
+      )),
+      " / ",
+      length(unique(
+        diffsig_tss_90min$gene_name
+      ))
+    )
+  ) +
+
+  remove_grid()
+```
+
+read in the 8hmins TSS files
+```{r}
+diffsig_tss_8h <- readRDS("df_tss_8h.rds")
+#diffsig_tss_8h$signed_significance_score <- sign(diffsig_tss_8h$logFC) * (-log10(diffsig_tss_8h$PValue))
+
+#only annotate the significant ones based on new rank
+diffsig_tss_8h <- diffsig_tss_8h %>%
+  dplyr::mutate(
+    signed_significance_score = ifelse(
+      PValue < 0.05,
+      sign(logFC) * (-log10(PValue)),
+      NA
+    )
+  )
+
+```
+
+find overlaps with what genes are these
+```{r}
+library(GenomicRanges)
+library(rtracklayer)
+# Convert your TSS table to GRanges
+tss_8h_gr <- GRanges(
+  seqnames = sub(":.*", "", diffsig_tss_8h$range),
+  ranges = IRanges(
+    start = as.numeric(sub(".*:", "", sub("-.*", "", diffsig_tss_8h$range))),
+    end = as.numeric(sub(".*-", "", diffsig_tss_8h$range))
+  )
+)
+
+# Find overlaps
+hits_tss_8h <- findOverlaps(tss_8h_gr, gene.gr )
+
+# Add gene information
+diffsig_tss_8h$gene_id <- NA
+diffsig_tss_8h$gene_name <- NA
+
+diffsig_tss_8h$gene_id[queryHits(hits_tss_8h)] <- gene.gr$gene_id[subjectHits(hits_tss_8h)]
+diffsig_tss_8h$gene_name[queryHits(hits_tss_8h)] <- gene.gr$gene_name[subjectHits(hits_tss_8h)]
+
+#export the output for the data
+write_csv(diffsig_tss_8h, "diffsig_tss_8h_significant_score_metadata.csv")
+```
+regenerate the MA plot with the new significance score rank
+
+```{r}
+ggplot(diffsig_tss_8h, aes(x = logCPM, y = logFC)) +
+
+  # Points coloured by signed significance score
+  geom_point(
+    aes(color = signed_significance_score),
+    alpha = 0.7,
+    size = 0.8
+  ) +
+
+  geom_hline(
+    yintercept = 0,
+    linetype = "dotted",
+    color = "black"
+  ) +
+
+  scale_color_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    na.value = "grey80",
+    name = "Signed\nsignificance score"
+  ) +
+
+  scale_y_continuous(
+    limits = c(-2, 2)
+  ) +
+
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+
+  labs(
+    x = "logCPM",
+    y = "log2 Fold Change",
+    title = "Differential signal TSS MA plot with signed significance score (8h vs 0 h)"
+  ) +
+
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    hjust = 1.1,
+    vjust = 1.5,
+    label = paste0(
+      "P-value < 0.05 windows: ",
+      sum(diffsig_tss_8h$PValue < 0.05, na.rm = TRUE),
+      " / ",
+      nrow(diffsig_tss_8h),
+      "\n",
+      "P-value < 0.05 genes: ",
+      length(unique(
+        diffsig_tss_8h$gene_name[
+          diffsig_tss_8h$PValue < 0.05
+        ]
+      )),
+      " / ",
+      length(unique(
+        diffsig_tss_8h$gene_name
+      ))
+    )
+  ) +
+
+  remove_grid()
+```
+
+
+Repeat the same for gene body
+read in the 90mins genebody files
+```{r}
+diffsig_genebody_90min <- readRDS("df_genebody_90min.rds")
+#diffsig_genebody_90min$signed_significance_score <- sign(diffsig_genebody_90min$logFC) * (-log10(diffsig_genebody_90min$PValue))
+
+#only annotate the significant ones based on new rank
+diffsig_genebody_90min <- diffsig_genebody_90min %>%
+  dplyr::mutate(
+    signed_significance_score = ifelse(
+      PValue < 0.05,
+      sign(logFC) * (-log10(PValue)),
+      NA
+    )
+  )
+
+```
+
+find overlaps with what genes are these
+```{r}
+library(GenomicRanges)
+library(rtracklayer)
+# Convert your genebody table to GRanges
+genebody_90_gr <- GRanges(
+  seqnames = sub(":.*", "", diffsig_genebody_90min$range),
+  ranges = IRanges(
+    start = as.numeric(sub(".*:", "", sub("-.*", "", diffsig_genebody_90min$range))),
+    end = as.numeric(sub(".*-", "", diffsig_genebody_90min$range))
+  )
+)
+
+# Find overlaps
+hits_genebody_90min <- findOverlaps(genebody_90_gr, gene.gr )
+
+# Add gene information
+diffsig_genebody_90min$gene_id <- NA
+diffsig_genebody_90min$gene_name <- NA
+
+diffsig_genebody_90min$gene_id[queryHits(hits_genebody_90min)] <- gene.gr$gene_id[subjectHits(hits_genebody_90min)]
+diffsig_genebody_90min$gene_name[queryHits(hits_genebody_90min)] <- gene.gr$gene_name[subjectHits(hits_genebody_90min)]
+
+#export the output for the data
+write_csv(diffsig_genebody_90min, "diffsig_genebody_90min_significant_score_metadata.csv")
+```
+regenerate the MA plot with the new significance score rank
+
+```{r}
+ggplot(diffsig_genebody_90min, aes(x = logCPM, y = logFC)) +
+
+  # Points coloured by signed significance score
+  geom_point(
+    aes(color = signed_significance_score),
+    alpha = 0.7,
+    size = 0.8
+  ) +
+
+  geom_hline(
+    yintercept = 0,
+    linetype = "dotted",
+    color = "black"
+  ) +
+
+  scale_color_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    na.value = "grey80",
+    name = "Signed\nsignificance score"
+  ) +
+
+  scale_y_continuous(
+    limits = c(-2, 2)
+  ) +
+
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+
+  labs(
+    x = "logCPM",
+    y = "log2 Fold Change",
+    title = "Differential signal genebody MA plot with signed significance score (90 min vs 0 h)"
+  ) +
+
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    hjust = 1.1,
+    vjust = 1.5,
+    label = paste0(
+      "P-value < 0.05 windows: ",
+      sum(diffsig_genebody_90min$PValue < 0.05, na.rm = TRUE),
+      " / ",
+      nrow(diffsig_genebody_90min),
+      "\n",
+      "P-value < 0.05 genes: ",
+      length(unique(
+        diffsig_genebody_90min$gene_name[
+          diffsig_genebody_90min$PValue < 0.05
+        ]
+      )),
+      " / ",
+      length(unique(
+        diffsig_genebody_90min$gene_name
+      ))
+    )
+  ) +
+
+  remove_grid()
+```
+
+read in the 8hmins genebody files
+```{r}
+diffsig_genebody_8h <- readRDS("df_genebody_8h.rds")
+#diffsig_genebody_8h$signed_significance_score <- sign(diffsig_genebody_8h$logFC) * (-log10(diffsig_genebody_8h$PValue))
+
+#only annotate the significant ones based on new rank
+diffsig_genebody_8h <- diffsig_genebody_8h %>%
+  dplyr::mutate(
+    signed_significance_score = ifelse(
+      PValue < 0.05,
+      sign(logFC) * (-log10(PValue)),
+      NA
+    )
+  )
+
+```
+
+find overlaps with what genes are these
+```{r}
+library(GenomicRanges)
+library(rtracklayer)
+# Convert your genebody table to GRanges
+genebody_8h_gr <- GRanges(
+  seqnames = sub(":.*", "", diffsig_genebody_8h$range),
+  ranges = IRanges(
+    start = as.numeric(sub(".*:", "", sub("-.*", "", diffsig_genebody_8h$range))),
+    end = as.numeric(sub(".*-", "", diffsig_genebody_8h$range))
+  )
+)
+
+# Find overlaps
+hits_genebody_8h <- findOverlaps(genebody_8h_gr, gene.gr )
+
+# Add gene information
+diffsig_genebody_8h$gene_id <- NA
+diffsig_genebody_8h$gene_name <- NA
+
+diffsig_genebody_8h$gene_id[queryHits(hits_genebody_8h)] <- gene.gr$gene_id[subjectHits(hits_genebody_8h)]
+diffsig_genebody_8h$gene_name[queryHits(hits_genebody_8h)] <- gene.gr$gene_name[subjectHits(hits_genebody_8h)]
+
+#export the output for the data
+write_csv(diffsig_genebody_8h, "diffsig_genebody_8h_significant_score_metadata.csv")
+```
+regenerate the MA plot with the new significance score rank
+
+```{r}
+ggplot(diffsig_genebody_8h, aes(x = logCPM, y = logFC)) +
+
+  # Points coloured by signed significance score
+  geom_point(
+    aes(color = signed_significance_score),
+    alpha = 0.7,
+    size = 0.8
+  ) +
+
+  geom_hline(
+    yintercept = 0,
+    linetype = "dotted",
+    color = "black"
+  ) +
+
+  scale_color_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    na.value = "grey80",
+    name = "Signed\nsignificance score"
+  ) +
+
+  scale_y_continuous(
+    limits = c(-2, 2)
+  ) +
+
+  theme(
+    legend.position = "right",
+    legend.direction = "vertical",
+    plot.title = element_text(hjust = 0.5, size = 12),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+
+  labs(
+    x = "logCPM",
+    y = "log2 Fold Change",
+    title = "Differential signal genebody MA plot with signed significance score (8h vs 0 h)"
+  ) +
+
+  annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    hjust = 1.1,
+    vjust = 1.5,
+    label = paste0(
+      "P-value < 0.05 windows: ",
+      sum(diffsig_genebody_8h$PValue < 0.05, na.rm = TRUE),
+      " / ",
+      nrow(diffsig_genebody_8h),
+      "\n",
+      "P-value < 0.05 genes: ",
+      length(unique(
+        diffsig_genebody_8h$gene_name[
+          diffsig_genebody_8h$PValue < 0.05
+        ]
+      )),
+      " / ",
+      length(unique(
+        diffsig_genebody_8h$gene_name
+      ))
+    )
+  ) +
+
+  remove_grid()
+```
+
+
