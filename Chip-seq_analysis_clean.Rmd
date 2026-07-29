@@ -1788,12 +1788,12 @@ pausing_ratio_q_plot <- ggplot(metadata_hist_quartile_df,
 
 #baseMean expression
 baseMean_q_plot <-ggplot(metadata_hist_quartile_df,
-       aes(x = factor(quartile), y = log2_pausing_ratio)) +
+       aes(x = factor(quartile), y = log2(baseMean_90min_0h))) +
   geom_boxplot(fill = "steelblue", alpha = 0.6, outlier.alpha = 0.3) +
   theme_classic() +
   labs(
     x = "log2FC Quartile",
-    y = "basemean expression",
+    y = "log2 basemean expression",
     title = "baseMeanExpression across log2FC quartiles (TSS)"
   )
 
