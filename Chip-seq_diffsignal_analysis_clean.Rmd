@@ -990,6 +990,8 @@ diffsig_tss_90min$gene_name <- NA
 diffsig_tss_90min$gene_id[queryHits(hits_tss_90min)] <- gene.gr$gene_id[subjectHits(hits_tss_90min)]
 diffsig_tss_90min$gene_name[queryHits(hits_tss_90min)] <- gene.gr$gene_name[subjectHits(hits_tss_90min)]
 
+
+
 #export the output for the data
 write_csv(diffsig_tss_90min, "diffsig_tss_90min_significant_score_metadata.csv")
 ```
@@ -1442,6 +1444,188 @@ ggplot(diffsig_genebody_8h, aes(x = logCPM, y = logFC)) +
   ) +
 
   remove_grid()
+```
+
+---
+Extended analysis from differential signal
+---
+
+Given that we have observed genes with higher pol II occupancy at 90min/8h compared to 0h and vice versa, we decided to investigate further on the properties of genes which showed differential signal.
+
+generate the metadata this time to include both the 90min and the 8h dataset, along with information such as pausing index,baseMean and gene length
+```{r}
+metadata_alltimepoints <- cov_boxplot_dfs_norm %>% dplyr::select(gene_id,hgnc_symbol,dataset, condition,coverage.fold)  %>% 
+  pivot_wider(
+    names_from = condition,
+    values_from = coverage.fold
+  ) %>%
+  left_join(pausingratio_csv_expanded_0h_baseline, #checked that the basemean are quite similar between 90min and 8h in pausingratio_csv_expanded
+            by = c("hgnc_symbol" = "gene.name")) %>%  mutate(length_category = case_when(
+    length >= 1000  & length < 5000  ~ "1_5kb",
+    length >= 5000  & length < 10000 ~ "5_10kb",
+    length >= 10000 & length < 25000 ~ "10_25kb",
+    length >= 25000 & length < 50000 ~ "25_50kb",
+    length >= 50000 & length < 75000 ~ "50_75kb",
+    length >= 75000 ~ "75kb_plus",
+    TRUE ~ NA_character_
+  ))
+```
+
+append the differential signal analysis data
+```{r}
+
+#list all the differential signal datasets together
+dfs_diff_sig <- list(
+  tss_90min = diffsig_tss_90min,
+  tss_8h = diffsig_tss_8h,
+  genebody_90min = diffsig_genebody_90min,
+  genebody_8h = diffsig_genebody_8h
+)
+
+#get average signed_significance as the signed significance score is per sliding window so we get an average to merge
+dfs_diff_sig_mean <- lapply(dfs_diff_sig, function(df) {
+  df %>%
+    group_by(gene_id) %>%
+    summarise(
+      mean_signed_significance_score = mean(signed_significance_score, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      mean_signed_significance_score = ifelse(
+        is.nan(mean_signed_significance_score),
+        NA_real_,
+        mean_signed_significance_score
+      ),
+      colour = case_when(
+        is.na(mean_signed_significance_score) ~ "grey",
+        mean_signed_significance_score > 0 ~ "red",
+        mean_signed_significance_score < 0 ~ "blue",
+        TRUE ~ "grey"
+      ),
+      colour = replace_na(colour, "grey")
+    )
+})
+#> lapply(dfs_diff_sig_mean, function(df) {
+#+     df %>%
+#+         filter(colour %in% c("red", "blue")) %>%
+#+         count(colour)
+#+ })
+#$tss_90min
+# A tibble: 2 × 2
+#  colour     n
+#  <chr>  <int>
+#1 blue    1443
+#2 red      153
+
+#$tss_8h
+# A tibble: 2 × 2
+#  colour     n
+#  <chr>  <int>
+#1 blue    1154
+#2 red      179
+
+#$genebody_90min
+# A tibble: 2 × 2
+#  colour     n
+#  <chr>  <int>
+#1 blue    6865
+#2 red     3741
+
+#$genebody_8h
+# A tibble: 2 × 2
+#  colour     n
+#  <chr>  <int>
+#1 blue    8307
+#2 red     2499
+
+
+result <- metadata_alltimepoints
+
+for (nm in names(dfs_diff_sig_mean)) {
+  result <- result %>%
+    left_join(
+      dfs_diff_sig_mean[[nm]] %>%
+        rename(
+          !!paste0("mean_signed_significance_score_", nm) := mean_signed_significance_score,
+          !!paste0("colour_", nm) := colour
+        ),
+      by = "gene_id"
+    )
+}
+
+```
+
+now plot the boxplots of 1) basemeanexpression, pausing index(log2), and gene length
+
+```{r}
+diffsig_plot_df <- result %>%
+  pivot_longer(
+    cols = starts_with("colour_"),
+    names_to = "comparison",
+    values_to = "colour"
+  ) %>%
+  mutate(
+    comparison = str_remove(comparison, "^colour_"),
+    timepoint = if_else(str_detect(comparison, "90min"), "90 min", "8 h"),
+    comparison_dataset = case_when(
+      str_detect(comparison, "^tss") ~ "TSS",
+      str_detect(comparison, "^genebody") ~ "Gene Body"
+    )
+  ) %>%
+  filter(dataset == comparison_dataset) %>% 
+  dplyr::filter(!is.na(colour))
+
+
+#make sure the plots are in the correct order
+diffsig_plot_df <- diffsig_plot_df %>%
+  filter(!is.na(colour)) %>%
+  mutate(
+    timepoint = factor(timepoint, levels = c("90 min", "8 h")),
+    dataset = factor(dataset, levels = c("TSS", "Gene Body"))
+  )
+#basemean
+diffsig_baseMean_plot <- ggplot(diffsig_plot_df,
+       aes(x = colour,
+           y = log2 (baseMean_90min_0h),
+           fill = colour)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  theme_bw() +facet_grid(dataset ~ timepoint)+
+  labs(
+    x = "Differential significance",
+    y = "log2 baseMean expression"
+  ) +
+  scale_fill_identity()
+
+#log2 pausing ratio
+diffsig_log2_pausingratio_plot <- ggplot(diffsig_plot_df,
+       aes(x = colour,
+           y = log2_pausing_ratio,
+           fill = colour)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  theme_bw() +facet_grid(dataset ~ timepoint) +
+  labs(
+    x = "Differential significance",
+    y = "log2 Pausing ratio"
+  ) +
+  scale_fill_identity()
+
+#genelength
+diffsig_log2_genelength_plot <- ggplot(diffsig_plot_df,
+       aes(x = colour,
+           y = log2(length),
+           fill = colour)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  theme_bw() +facet_grid(dataset ~ timepoint)+
+  labs(
+    x = "Differential significance",
+    y = "log2 gene length"
+  ) +
+  scale_fill_identity()
+
+ 
+ #combine the plots together by patchwork
+
+diffsig_baseMean_plot + diffsig_log2_pausingratio_plot  + diffsig_log2_genelength_plot
 ```
 
 
