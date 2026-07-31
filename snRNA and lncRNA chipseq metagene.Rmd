@@ -1,0 +1,413 @@
+---
+title: "snRNA and lncRNA metagene profiles for chipseq"
+author: "Pei Qin (Sabrina) Ng"
+date: "2026-07-30"
+output: html_document
+---
+
+This is to analyse metagene plot for chipseq metagene as in chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.biorxiv.org/content/10.1101/2025.09.18.677100v1.full.pdf
+---
+Metagene plot analysis - lncRNA
+---
+Gent the lncRNA annotation
+```{r}
+#annotation file (the same as in ELOA P1)
+#hg38.gtf <- read.table("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf", header=FALSE, sep= "\t")
+
+#generate non-overlapping gene annotation (using Granges, rtracklayer , and genomicfeatures)
+gtf.dat <- import("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf")
+lncRNA.gr <- gtf.dat[gtf.dat$type  %in% "gene",]
+lncRNA.gr$gene.width <- GenomicRanges::width(lncRNA.gr)
+lncRNA.gr <- lncRNA.gr[lncRNA.gr$gene_biotype %in% "lncRNA"]
+
+lncRNA.gr <- keepSeqlevels(lncRNA.gr,c(as.character(1:22),"X","Y"),pruning.mode="coarse")
+#lncRNA.gr<- lncRNA.gr[width(lncRNA.gr) >1000]
+#convert to dataframe from this step 9Granges can be problematic)
+hg38.lncRNA <- as.data.frame(lncRNA.gr) %>% dplyr::rename("chr" = "seqnames") %>% mutate(chr = paste0("chr", chr))
+
+
+
+# Filter lncRNA by strand
+hg38.lncRNA.pos <- hg38.lncRNA %>% filter(strand=="+") 
+hg38.lncRNA.neg <- hg38.lncRNA %>% filter(strand=="-")
+ 
+
+# Define upstream and downstream flanking regions 
+# Note that mutate() updates columns from left to right: it first moves ‘start’ 5 kb upstream, then sets ‘end’ 5 kb downstream of this new start. The resulting window (for upstream flanking regions) therefore runs from −5 kb to the TSS.
+hg38.lncRNA.pos.upstream.flank <- hg38.lncRNA.pos %>% mutate(start=start-5000,end=start+5000) %>% filter(start>0)
+hg38.lncRNA.neg.upstream.flank <- hg38.lncRNA.neg  %>% mutate(start=end,end=start+5000) %>% filter(start>0)
+hg38.lncRNA.pos.downstream.flank <- hg38.lncRNA.pos %>% mutate(start=end,end=start+5000)
+hg38.lncRNA.neg.downstream.flank <- hg38.lncRNA.neg  %>% mutate(start=start-5000,end=start+5000)
+ 
+# Save files
+write.table(hg38.lncRNA.pos, "hg38.lncRNA.pos.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncRNA.neg, "hg38.lncRNA.neg.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncRNA.pos.upstream.flank, "hg38.lncRNA.pos.upstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncRNA.neg.upstream.flank, "hg38.lncRNA.neg.upstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncRNA.pos.downstream.flank, "hg38.lncRNA.pos.downstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncRNA.neg.downstream.flank, "hg38.lncRNA.neg.downstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+
+```
+
+
+After this use bedtools to split windows.
+
+```{bash, chipseq_bedtools_makewindows.sh}
+
+#tile the bed files 
+bedtools makewindows -b hg38.lncRNA.pos.bed -n 60 -i winnum > hg38.pos.windows.60w.bed
+bedtools makewindows -b hg38.lncRNA.neg.bed -n 60 -i winnum -reverse > hg38.neg.windows.60w.bed
+
+
+#for upstream flanked
+bedtools makewindows -b hg38.lncRNA.pos.upstream.flank.bed -n 20 -i winnum > hg38.pos.upstream.windows.20w.bed
+bedtools makewindows -b hg38.lncRNA.neg.upstream.flank.bed -n 20 -i winnum -reverse > hg38.neg.upstream.windows.20w.bed
+
+#for downstream flanked
+
+bedtools makewindows -b hg38.lncRNA.pos.downstream.flank.bed -n 20 -i winnum > hg38.pos.downstream.windows.20w.bed
+bedtools makewindows -b hg38.lncRNA.neg.downstream.flank.bed -n 20 -i winnum -reverse > hg38.neg.downstream.windows.20w.bed
+# Combine the files as in the Star protocol (instead of R use awk so I can sort)
+
+# Step 1: Combine gene tiles and add 20 to bin numbers (V4)
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 20; print }' hg38.pos.windows.60w.bed > lncRNA.tmp
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 20; print }' hg38.neg.windows.60w.bed >> lncRNA.tmp
+
+# Step 2: Combine upstream flanks without change
+cat hg38.pos.upstream.windows.20w.bed hg38.neg.upstream.windows.20w.bed > upstream.tmp
+
+
+# Step 3: Combine downstream flanks and add 80 to bin numbers (V4)
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 80; print }' hg38.pos.downstream.windows.20w.bed > downstream.tmp
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 80; print }' hg38.neg.downstream.windows.20w.bed >> downstream.tmp
+
+# Step 4: Combine all tiles
+cat lncRNA.tmp upstream.tmp downstream.tmp > hg38.lncRNA.and.flanks.tiled.bed
+
+# Step 5: Cleanup temporary files
+rm lncRNA.tmp upstream.tmp downstream.tmp
+
+# Sort
+sort -k1,1 -k2,2n hg38.lncRNA.and.flanks.tiled.bed > hg38.lncRNA.and.flanks.tiled.sorted.bed
+
+```
+
+map it onto the binned, non-overlapping bedfiles
+
+note: For this part of the script, use the same name bash script and run it on the cluster
+
+```{bash, chipseq_array_bigwig.sh}
+
+############################## generate big wig files using job array ###################
+
+#Pre-script execution:
+#Pre-script execution:
+#Before running this script, run this code to generate file list with job arrays:
+#ls ${FILESDIR}| rev | cut -c 12- | rev | uniq > chip_bw_list.txt
+
+
+#these individual big wig file has been normalised using RPKM
+#run UCSC bigwigMerge to combine the bigwigs (do all except for the rep3 8h - exclude from the study as we have verieid that it is a problematic sample, moved it to merged library)
+bigWigMerge ${FILESDIR}/${PREFIX}_rep1.bigWig ${FILESDIR}/${PREFIX}_rep2.bigWig ${FILESDIR}/${PREFIX}_rep3.bigWig ${OUTDIR}/${PREFIX}_merged.bedGraph 
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "bigwig merging failed for ${PREFIX}" >&2
+    exit 1
+else
+    echo "bigwig merging succeeded for ${PREFIX}"
+fi
+
+
+#sort the bedgraphs
+bedSort ${OUTDIR}/${PREFIX}_merged.bedGraph  ${OUTDIR}/${PREFIX}_merged_sorted.bedGraph
+
+#convert the bedgraph to bigwig again
+bedGraphToBigWig ${OUTDIR}/${PREFIX}_merged_sorted.bedGraph ${REFDIR}/homo_sapiens__GRCh38__release102.dna.fa.sizes ${OUTDIR}/${PREFIX}_merged.bw
+
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "conversion to bigwig failed for ${PREFIX}" >&2
+    exit 3
+else
+    echo "conversion to bigwig succeeded for ${PREFIX}"
+fi
+
+#filter for main chromosomes but also append "chr" to the chromosomes that were kept for mapping compatibility downstream
+awk '$1 ~ /^(1?[0-9]|2[0-2]|X|Y|M)$/ { $1 = "chr"$1; print }' OFS='\t' "${OUTDIR}/${PREFIX}_merged_sorted.bedGraph" > "${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph"
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "bed cleaning new failed for ${PREFIX}" >&2
+    exit 6
+else
+    echo "bed cleaning new succeeded for ${PREFIX}"
+fi
+
+
+
+###################################### DO NOT RUN this as part of the pipeline #####################
+#blacklisted regions has been filtered out using samtools and bamtools according to the nextflowpipeline
+
+
+#parse the defined bed files from gtfs and map it to the cleaned bed files (sorted using bedSort)
+#bedtools map -a ./Datasets/POLII_ARMC5_8_24/Analysis/Windows/hg38.TSS.windows.100w.sorted.bed -b ./Datasets/POLII_ARMC5_8_24/bed_RPKM/K8_INP_merged.50nt.RPKM.blacklist.bed -c 4 -o mean -null 0 > ./Datasets/POLII_ARMC5_8_24/Analysis/Coverage/hg38.genes.K8_INP.fwd.coverage.bed
+#bedtools map -a ./Datasets/POLII_ARMC5_8_24/Analysis/Windows/hg38.TSS.windows.100w.sorted.bed -b ./Datasets/POLII_ARMC5_8_24/bed_RPKM/K_INP_merged.50nt.RPKM.blacklist.bed -c 4 -o mean -null 0 > ./Datasets/POLII_ARMC5_8_24/Analysis/Coverage/hg38.genes.K_INP.fwd.coverage.bed
+
+bedtools map -a ${OUTDIR}/hg38.genes.and.flanks.tiled.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_redone.bed
+# Check for errors
+if [ $? -ne 0 ]; then
+    echo "mapping to tiled gtf failed for ${PREFIX}" >&2
+    exit 9
+else
+    echo "mapping to tiled gtf succeeded for ${PREFIX}"
+fi
+
+```
+
+
+---
+sRNA
+---
+
+```{r}
+gtf.dat <- import("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf")
+srna.gr <- gtf.dat[gtf.dat$type  %in% "gene",]
+srna.gr$gene.width <- GenomicRanges::width(srna.gr)
+srna.gr<- srna.gr[srna.gr$gene_biotype %in% "snRNA"]
+srna.gr <- keepSeqlevels(srna.gr,c(as.character(1:22),"X","Y"),pruning.mode="coarse")
+srna.gr <- srna.gr[width(srna.gr ) >60]
+#convert to dataframe from this step 9Granges can be problematic)
+hg38.srna <- as.data.frame(srna.gr) %>% dplyr::rename("chr" = "seqnames") %>% mutate(chr = paste0("chr", chr))
+
+
+
+# Filter srna by strand
+hg38.srna.pos <- hg38.srna %>% filter(strand=="+") 
+hg38.srna.neg <- hg38.srna %>% filter(strand=="-")
+ 
+
+# Define upstream and downstream flanking regions 
+# Note that mutate() updates columns from left to right: it first moves ‘start’ 5 kb upstream, then sets ‘end’ 5 kb downstream of this new start. The resulting window (for upstream flanking regions) therefore runs from −5 kb to the TSS.
+hg38.srna.pos.upstream.flank <- hg38.srna.pos %>% mutate(start=start-5000,end=start+5000) %>% filter(start>0)
+hg38.srna.neg.upstream.flank <- hg38.srna.neg  %>% mutate(start=end,end=start+5000) %>% filter(start>0)
+hg38.srna.pos.downstream.flank <- hg38.srna.pos %>% mutate(start=end,end=start+5000)
+hg38.srna.neg.downstream.flank <- hg38.srna.neg  %>% mutate(start=start-5000,end=start+5000)
+ 
+# Save files
+write.table(hg38.srna.pos, "hg38.srna.pos.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.neg, "hg38.srna.neg.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.pos.upstream.flank, "hg38.srna.pos.upstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.neg.upstream.flank, "hg38.srna.neg.upstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.pos.downstream.flank, "hg38.srna.pos.downstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.neg.downstream.flank, "hg38.srna.neg.downstream.flank.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+
+```
+
+use the same binning for sRNA (confirmed by Alastair)
+
+
+```{bash, chipseq_bedtools_makewindows.sh}
+
+#tile the bed files 
+bedtools makewindows -b hg38.srna.pos.bed -n 60 -i winnum > hg38.pos.windows.60w.bed
+bedtools makewindows -b hg38.srna.neg.bed -n 60 -i winnum -reverse > hg38.neg.windows.60w.bed
+
+
+#for upstream flanked
+bedtools makewindows -b hg38.srna.pos.upstream.flank.bed -n 20 -i winnum > hg38.pos.upstream.windows.20w.bed
+bedtools makewindows -b hg38.srna.neg.upstream.flank.bed -n 20 -i winnum -reverse > hg38.neg.upstream.windows.20w.bed
+
+#for downstream flanked
+
+bedtools makewindows -b hg38.srna.pos.downstream.flank.bed -n 20 -i winnum > hg38.pos.downstream.windows.20w.bed
+bedtools makewindows -b hg38.srna.neg.downstream.flank.bed -n 20 -i winnum -reverse > hg38.neg.downstream.windows.20w.bed
+# Combine the files as in the Star protocol (instead of R use awk so I can sort)
+
+# Step 1: Combine gene tiles and add 20 to bin numbers (V4)
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 20; print }' hg38.pos.windows.60w.bed > srna.tmp
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 20; print }' hg38.neg.windows.60w.bed >> srna.tmp
+
+# Step 2: Combine upstream flanks without change
+cat hg38.pos.upstream.windows.20w.bed hg38.neg.upstream.windows.20w.bed > upstream.tmp
+
+
+# Step 3: Combine downstream flanks and add 80 to bin numbers (V4)
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 80; print }' hg38.pos.downstream.windows.20w.bed > downstream.tmp
+awk 'BEGIN{OFS="\t"} { $4 = $4 + 80; print }' hg38.neg.downstream.windows.20w.bed >> downstream.tmp
+
+# Step 4: Combine all tiles
+cat srna.tmp upstream.tmp downstream.tmp > hg38.srna.and.flanks.tiled.bed
+
+# Step 5: Cleanup temporary files
+rm srna.tmp upstream.tmp downstream.tmp
+
+# Sort
+sort -k1,1 -k2,2n hg38.srna.and.flanks.tiled.bed > hg38.srna.and.flanks.tiled.sorted.bed
+
+```
+
+
+read in all the remapped bed files with binned coverage
+```{r}
+avg_bed_pattern = "\\merged.clean.cov_redone.bed"
+
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb 
+list.files(pattern = avg_bed_pattern) %>%
+  walk(function(x) {
+    print(x)
+    
+    df <- read.table(x, header = FALSE) %>%
+      dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5) 
+   
+    # Extract prefix of filename (remove extension)
+    prefix <- str_remove(basename(x), "\\.[^.]*$")
+    
+    # Assign individual dataframe to an object named after the prefix
+    assign(paste0(prefix, "_5kb"), df, envir = .GlobalEnv)
+  })
+```
+
+use the same mapping code for the genes metagene (refer to chip-seq_analysis_clean).
+```{r}
+avg_bed_pattern = "\\merged.clean.cov_srna.bed"
+
+list.files(path = "/Users/png/Desktop/ATV_lab_projects/Degron_RPB1_project_collab/chipseq_metagene", pattern = avg_bed_pattern, full.names = TRUE) %>%
+  walk(function(x) {
+    print(x)
+    
+    df <- read.table(x, header = FALSE) %>%
+      dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5)
+   
+    prefix <- str_remove(basename(x), "\\.[^.]*$")
+    
+    assign(paste0(prefix, "_5kb"), df, envir = .GlobalEnv)
+  })
+```
+
+
+normalise the coverage to generate the metagene plot
+```{r}
+
+#list all the dataframe which I wanted to loop
+sRNA_coverage_list <- list(
+  D8L4Y_0h = D8L4Y_0h_merged.clean.cov_srna_5kb,
+  D8L4Y_90min = D8L4Y_90min_merged.clean.cov_srna_5kb,
+  D8L4Y_8h = D8L4Y_8h_merged.clean.cov_srna_5kb,
+  Input = INP_0h_merged.clean.cov_srna_5kb
+)
+
+#create function to parse thrugh dataframes to calculate mean and sem then normalized all values to the first bin
+#this part is where the normalised signal to background comes in
+normalize_coverage <- function(df) {
+  df %>%
+    group_by(bin) %>%
+    summarise(
+      COV.mean = mean(COV),
+      SEM = sd(COV) / sqrt(n()),
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(
+      COV.norm = COV.mean / COV.mean[1], #normalisation to the background ie region upstream of the TSS
+      SEM.norm = SEM / COV.mean[1]
+    )
+}
+ 
+
+#lapply the function across all dataframes 
+sRNA_plot_list <- lapply(sRNA_coverage_list, normalize_coverage)
+
+#combine the individual dataframes into plots
+sRNA_combined.plot <- bind_rows(sRNA_plot_list, .id = "Sample")
+
+#make sure the legend is in the right order
+sRNA_combined.plot$Sample <- factor(
+  sRNA_combined.plot$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min", "D8L4Y_8h", "Input")
+)
+
+# plot the coverage plot
+sRNA_metagene_plot <- ggplot(sRNA_combined.plot, aes(x = bin, y = COV.norm, color = Sample, fill = Sample)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = COV.norm - SEM.norm, ymax = COV.norm + SEM.norm), alpha = 0.3, color = NA) +
+  scale_x_continuous(
+    breaks = c(1, 20, 40, 60, 80, 100),
+    labels = c("1" = "-5kb", "20" = "TSS", "40" = "33%", "60" = "66%", "80" = "TTS", "100" = "+5kb")
+  ) +
+  ylab("Normalised coverage (signal / background)") +
+  theme_bw() +
+  scale_color_manual(values = c( "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  theme(
+    aspect.ratio = 1,
+    axis.text.x = element_text(size = 11, hjust = 0.5),
+    axis.text.y = element_text(size = 11),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 12, face = "bold", vjust = 4),
+    plot.title = element_text(size = 15, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+#supplementary figure 6
+sRNA_combined.plot.partial <- sRNA_combined.plot %>% dplyr::filter(Sample != "D8L4Y_8h" )
+
+sRNA_combined.plot.partial$Sample <- factor(
+  sRNA_combined.plot.partial$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min","Input")
+)
+
+
+#metagene plot 90min vs 0h only
+
+sRNA_metagene_plot.partial <- ggplot(sRNA_combined.plot.partial, aes(x = bin, y = COV.norm, color = Sample, fill = Sample)) +
+  geom_line(size = 0.5) +
+  geom_ribbon(aes(ymin = COV.norm - SEM.norm, ymax = COV.norm + SEM.norm), alpha = 0.3, color = NA) +
+  scale_x_continuous(
+    breaks = c(1, 20, 40, 60, 80, 100),
+    labels = c("1" = "-5kb", "20" = "TSS", "40" = "33%", "60" = "66%", "80" = "TTS", "100" = "+5kb")
+  ) +
+  ylab("Normalised coverage (signal/background") +
+  theme_bw() +
+  scale_color_manual(values = c( "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  scale_color_manual(values = c( "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  theme(text = element_text(family = "sans"),
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+     axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 14),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+  ggdag::remove_grid()
+
+
+
+```
