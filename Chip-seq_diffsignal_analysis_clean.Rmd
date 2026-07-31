@@ -1047,32 +1047,47 @@ ggplot(diffsig_tss_90min, aes(x = logCPM, y = logFC)) +
     title = "Differential signal TSS MA plot with signed significance score (90 min vs 0 h)"
   ) +
 
-  annotate(
-    "text",
-    x = Inf,
-    y = Inf,
-    hjust = 1.1,
-    vjust = 1.5,
-    label = paste0(
-      "P-value < 0.05 windows: ",
-      sum(diffsig_tss_90min$PValue < 0.05, na.rm = TRUE),
-      " / ",
-      nrow(diffsig_tss_90min),
-      "\n",
-      "P-value < 0.05 genes: ",
-      length(unique(
-        diffsig_tss_90min$gene_name[
-          diffsig_tss_90min$PValue < 0.05
-        ]
-      )),
-      " / ",
-      length(unique(
-        diffsig_tss_90min$gene_name
-      ))
-    )
-  ) +
-
-  remove_grid()
+ annotate(
+  "text",
+  x = Inf,
+  y = Inf,
+  hjust = 1.1,
+  vjust = 1.5,
+  label = paste0(
+    "P-value < 0.05 windows: ",
+    sum(diffsig_tss_90min$PValue < 0.05, na.rm = TRUE),
+    " / ",
+    nrow(diffsig_tss_90min),
+    "\n",
+    "P-value < 0.05 genes: ",
+    length(unique(
+      diffsig_tss_90min$gene_name[
+        diffsig_tss_90min$PValue < 0.05
+      ]
+    )),
+    " / ",
+    length(unique(
+      diffsig_tss_90min$gene_name
+    )),
+    "\n",
+    "Genes with blue windows: ",
+    length(unique(
+      diffsig_tss_90min$gene_name[
+        diffsig_tss_90min$PValue < 0.05 &
+        diffsig_tss_90min$logFC < 0
+      ]
+    )),
+    "\n",
+    "Genes with red windows: ",
+    length(unique(
+      diffsig_tss_90min$gene_name[
+        diffsig_tss_90min$PValue < 0.05 &
+        diffsig_tss_90min$logFC > 0
+      ]
+    ))
+  )
+)+
+ggdag::remove_grid()
 ```
 
 read in the 8hmins TSS files
@@ -1170,32 +1185,45 @@ ggplot(diffsig_tss_8h, aes(x = logCPM, y = logFC)) +
     title = "Differential signal TSS MA plot with signed significance score (8h vs 0 h)"
   ) +
 
-  annotate(
-    "text",
-    x = Inf,
-    y = Inf,
-    hjust = 1.1,
-    vjust = 1.5,
-    label = paste0(
-      "P-value < 0.05 windows: ",
-      sum(diffsig_tss_8h$PValue < 0.05, na.rm = TRUE),
-      " / ",
-      nrow(diffsig_tss_8h),
-      "\n",
-      "P-value < 0.05 genes: ",
-      length(unique(
-        diffsig_tss_8h$gene_name[
-          diffsig_tss_8h$PValue < 0.05
-        ]
-      )),
-      " / ",
-      length(unique(
-        diffsig_tss_8h$gene_name
-      ))
-    )
-  ) +
-
-  remove_grid()
+ annotate(
+  "text",
+  x = Inf,
+  y = Inf,
+  hjust = 1.1,
+  vjust = 1.5,
+  label = paste0(
+    "P-value < 0.05 windows: ",
+    sum(diffsig_tss_8h$PValue < 0.05, na.rm = TRUE),
+    " / ",
+    nrow(diffsig_tss_8h),
+    "\n",
+    "P-value < 0.05 genes: ",
+    length(unique(
+      diffsig_tss_8h$gene_name[
+        diffsig_tss_8h$PValue < 0.05
+      ]
+    )),
+    " / ",
+    length(unique(diffsig_tss_8h$gene_name)),
+    "\n",
+    "Genes with blue windows: ",
+    length(unique(
+      diffsig_tss_8h$gene_name[
+        diffsig_tss_8h$PValue < 0.05 &
+        diffsig_tss_8h$logFC < 0
+      ]
+    )),
+    "\n",
+    "Genes with red windows: ",
+    length(unique(
+      diffsig_tss_8h$gene_name[
+        diffsig_tss_8h$PValue < 0.05 &
+        diffsig_tss_8h$logFC > 0
+      ]
+    ))
+  )
+)+
+ggdag::remove_grid()
 ```
 
 
@@ -1221,6 +1249,9 @@ find overlaps with what genes are these
 ```{r}
 library(GenomicRanges)
 library(rtracklayer)
+
+
+
 # Convert your genebody table to GRanges
 genebody_90_gr <- GRanges(
   seqnames = sub(":.*", "", diffsig_genebody_90min$range),
@@ -1246,6 +1277,7 @@ write_csv(diffsig_genebody_90min, "diffsig_genebody_90min_significant_score_meta
 regenerate the MA plot with the new significance score rank
 
 ```{r}
+
 ggplot(diffsig_genebody_90min, aes(x = logCPM, y = logFC)) +
 
   # Points coloured by signed significance score
@@ -1296,31 +1328,45 @@ ggplot(diffsig_genebody_90min, aes(x = logCPM, y = logFC)) +
   ) +
 
   annotate(
-    "text",
-    x = Inf,
-    y = Inf,
-    hjust = 1.1,
-    vjust = 1.5,
-    label = paste0(
-      "P-value < 0.05 windows: ",
-      sum(diffsig_genebody_90min$PValue < 0.05, na.rm = TRUE),
-      " / ",
-      nrow(diffsig_genebody_90min),
-      "\n",
-      "P-value < 0.05 genes: ",
-      length(unique(
-        diffsig_genebody_90min$gene_name[
-          diffsig_genebody_90min$PValue < 0.05
-        ]
-      )),
-      " / ",
-      length(unique(
-        diffsig_genebody_90min$gene_name
-      ))
-    )
-  ) +
+  "text",
+  x = Inf,
+  y = Inf,
+  hjust = 1.1,
+  vjust = 1.5,
+  label = paste0(
+    "P-value < 0.05 windows: ",
+    sum(diffsig_genebody_90min$PValue < 0.05, na.rm = TRUE),
+    " / ",
+    nrow(diffsig_genebody_90min),
+    "\n",
+    "P-value < 0.05 genes: ",
+    length(unique(
+      diffsig_genebody_90min$gene_name[
+        diffsig_genebody_90min$PValue < 0.05
+      ]
+    )),
+    " / ",
+    length(unique(diffsig_genebody_90min$gene_name)),
+    "\n",
+    "Genes with blue windows: ",
+    length(unique(
+      diffsig_genebody_90min$gene_name[
+        diffsig_genebody_90min$PValue < 0.05 &
+        diffsig_genebody_90min$logFC < 0
+      ]
+    )),
+    "\n",
+    "Genes with red windows: ",
+    length(unique(
+      diffsig_genebody_90min$gene_name[
+        diffsig_genebody_90min$PValue < 0.05 &
+        diffsig_genebody_90min$logFC > 0
+      ]
+    ))
+  )
+) +
 
-  remove_grid()
+ggdag::remove_grid()
 ```
 
 read in the 8hmins genebody files
@@ -1418,32 +1464,48 @@ ggplot(diffsig_genebody_8h, aes(x = logCPM, y = logFC)) +
     title = "Differential signal genebody MA plot with signed significance score (8h vs 0 h)"
   ) +
 
-  annotate(
-    "text",
-    x = Inf,
-    y = Inf,
-    hjust = 1.1,
-    vjust = 1.5,
-    label = paste0(
-      "P-value < 0.05 windows: ",
-      sum(diffsig_genebody_8h$PValue < 0.05, na.rm = TRUE),
-      " / ",
-      nrow(diffsig_genebody_8h),
-      "\n",
-      "P-value < 0.05 genes: ",
-      length(unique(
-        diffsig_genebody_8h$gene_name[
-          diffsig_genebody_8h$PValue < 0.05
-        ]
-      )),
-      " / ",
-      length(unique(
-        diffsig_genebody_8h$gene_name
-      ))
-    )
-  ) +
+ annotate(
+  "text",
+  x = Inf,
+  y = Inf,
+  hjust = 1.1,
+  vjust = 1.5,
+  label = paste0(
+    "P-value < 0.05 windows: ",
+    sum(diffsig_genebody_8h$PValue < 0.05, na.rm = TRUE),
+    " / ",
+    nrow(diffsig_genebody_8h),
+    "\n",
+    "P-value < 0.05 genes: ",
+    length(unique(
+      diffsig_genebody_8h$gene_name[
+        diffsig_genebody_8h$PValue < 0.05
+      ]
+    )),
+    " / ",
+    length(unique(
+      diffsig_genebody_8h$gene_name
+    )),
+    "\n",
+    "Genes with blue windows: ",
+    length(unique(
+      diffsig_genebody_8h$gene_name[
+        diffsig_genebody_8h$PValue < 0.05 &
+        diffsig_genebody_8h$logFC < 0
+      ]
+    )),
+    "\n",
+    "Genes with red windows: ",
+    length(unique(
+      diffsig_genebody_8h$gene_name[
+        diffsig_genebody_8h$PValue < 0.05 &
+        diffsig_genebody_8h$logFC > 0
+      ]
+    ))
+  )
+) +
 
-  remove_grid()
+  ggdag::remove_grid()
 ```
 
 ---
@@ -1459,7 +1521,7 @@ metadata_alltimepoints <- cov_boxplot_dfs_norm %>% dplyr::select(gene_id,hgnc_sy
     names_from = condition,
     values_from = coverage.fold
   ) %>%
-  left_join(pausingratio_csv_expanded_0h_baseline, #checked that the basemean are quite similar between 90min and 8h in pausingratio_csv_expanded
+  left_join(pausingratio_csv_expanded_0h_baseline, #checked that the basemean are quite similar between 90min and 8h in pausingratio_csv_expanded, this is just the property of the pausing ratio at 0h (native)
             by = c("hgnc_symbol" = "gene.name")) %>%  mutate(length_category = case_when(
     length >= 1000  & length < 5000  ~ "1_5kb",
     length >= 5000  & length < 10000 ~ "5_10kb",
@@ -1543,16 +1605,15 @@ result <- metadata_alltimepoints
 
 for (nm in names(dfs_diff_sig_mean)) {
   result <- result %>%
-    left_join(
+    dplyr::left_join(
       dfs_diff_sig_mean[[nm]] %>%
-        rename(
+        dplyr::rename(
           !!paste0("mean_signed_significance_score_", nm) := mean_signed_significance_score,
           !!paste0("colour_", nm) := colour
         ),
       by = "gene_id"
     )
 }
-
 ```
 
 now plot the boxplots of 1) basemeanexpression, pausing index(log2), and gene length
@@ -1628,4 +1689,513 @@ diffsig_log2_genelength_plot <- ggplot(diffsig_plot_df,
 diffsig_baseMean_plot + diffsig_log2_pausingratio_plot  + diffsig_log2_genelength_plot
 ```
 
+---
+Scatter plots 
+---
 
+plot scatter plot of log2FC of TSS vs gene body for both timepoints : 90min and 8h, compared to 0h
+
+```{r}
+
+#add the mean significance score and colour information back to the individual dataframe
+dfs_diff_sig_joined <- purrr::map2(dfs_diff_sig, dfs_diff_sig_mean, ~
+  .x %>%
+    left_join(
+      .y %>%
+        select(gene_id, mean_signed_significance_score, colour),
+      by = "gene_id"
+    )
+)
+
+#combine all thedataframes together
+dfs_diff_sig_joined_combined <- bind_rows(dfs_diff_sig_joined, .id = "source") 
+
+#generate the data required to plot TSS vs genebody scatterplot
+scatter_diffsig_plot_df <- dfs_diff_sig_joined_combined %>%
+  mutate(
+    region = case_when(
+      grepl("^tss", source) ~ "TSS",
+      grepl("^genebody", source) ~ "Genebody"
+    ),
+    time = case_when(
+      grepl("90min", source) ~ "90min",
+      grepl("8h", source) ~ "8h"
+    )
+  ) %>%
+  group_by(gene_id, gene_name, time, region) %>%
+  summarise(
+  logFC = mean(logFC, na.rm = TRUE),
+  colour = colour[1],
+  .groups = "drop"
+) %>%
+  pivot_wider(
+    names_from = region,
+    values_from = c(logFC, colour)
+  ) %>%
+  mutate(
+    colour_combo = paste(colour_TSS, colour_Genebody, sep = "_")
+  ) %>% mutate(
+    direction_class = case_when(
+      colour_combo %in% c("red_red", "blue_blue") ~ "Same direction",
+      colour_combo %in% c("red_blue", "blue_red") ~ "Opposite direction",
+      colour_combo %in% c("red_grey", "blue_grey") ~ "TSS only",
+      colour_combo %in% c("grey_red", "grey_blue") ~ "Gene body only",
+      colour_combo == "grey_grey" ~ "No change",
+      TRUE ~ "Other"
+    )
+  )
+
+combo_cols <- c(
+  "Same direction"    = "purple",
+  "Opposite direction" = "orange",
+  "TSS only"          = "red",
+  "Gene body only"    = "blue",
+  "No change"         = "grey70"
+)
+
+
+#reorder the levels
+scatter_diffsig_plot_df <- scatter_diffsig_plot_df %>%
+  mutate(
+    time = factor(time, levels = c("90min", "8h"))
+  )
+
+
+#plot the scatter plot of comparisons
+TSSvsgenebody_scatter_plot <- ggplot(scatter_diffsig_plot_df,
+       aes(x = logFC_TSS,
+           y = logFC_Genebody,
+           colour = direction_class)) +
+  geom_hline(yintercept = 0, linetype = 2, colour = "grey70") +
+  geom_vline(xintercept = 0, linetype = 2, colour = "grey70") +
+  geom_point(alpha = 0.8, size = 2) +
+  facet_wrap(~time) +
+  scale_colour_manual(values = combo_cols, na.value = "black") +
+  labs(
+    x = "TSS log2FC",
+    y = "Gene body log2FC",
+    colour = "Significance"
+  ) +
+  theme_bw() + ggdag::remove_grid()
+
+#generate the more refined statistics of TSS:Genebody
+colour_combo_table <- scatter_diffsig_plot_df %>%
+  group_by(colour_combo, time) %>%
+  summarise(n = n(), .groups = "drop")
+
+View(colour_combo_table)
+
+#density plots for the TSS vs genebody scatter plots
+TSSvsgenebody_scatter_densityplot <- ggplot(
+  scatter_diffsig_plot_df,
+  aes(x = logFC_TSS, y = logFC_Genebody)
+) + scale_x_continuous(breaks = c(-2,-1,0,1,2)) + 
+  scale_y_continuous(breaks = c(-2,-1,0,1,2))+
+  geom_bin2d(bins = 80) +
+  scale_fill_viridis_c(name = "Gene count") +
+  geom_hline(yintercept = 0, linetype = 2, colour = "grey70") +
+  geom_vline(xintercept = 0, linetype = 2, colour = "grey70") +
+  facet_wrap(~time) +
+  labs(
+    x = "TSS log2FC",
+    y = "Gene body log2FC"
+  ) +
+  theme_bw()+ggdag::remove_grid()
+
+
+#with correlation coeefficient
+library(ggplot2)
+library(ggpubr)
+library(ggdag)
+
+TSSvsgenebody_scatter_densityplot_corr <- ggplot(
+  scatter_diffsig_plot_df,
+  aes(x = logFC_TSS, y = logFC_Genebody)
+) +
+  scale_x_continuous(
+    breaks = c(-2, -1, 0, 1, 2)
+  ) +
+  scale_y_continuous(
+    breaks = c(-2, -1, 0, 1, 2)
+  ) +
+  geom_bin2d(bins = 80) +
+  scale_fill_viridis_c(name = "Gene count") +
+  geom_smooth(
+    method = "lm",
+    colour = "red",
+    linewidth = 1,
+    se = FALSE
+  ) +
+  stat_cor(
+    method = "pearson",
+    aes(label = paste(..r.label.., ..p.label.., sep = "~`,`~")),
+    label.x.npc = "left",
+    label.y.npc = "top",
+    size = 5
+  ) +
+  geom_hline(
+    yintercept = 0,
+    linetype = 2,
+    colour = "grey70"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = 2,
+    colour = "grey70"
+  ) +
+  facet_wrap(~time) +
+  labs(
+    x = "TSS log2 Fold Change",
+    y = "Gene body log2 Fold Change"
+  ) +
+  theme_bw() +
+  ggdag::remove_grid() +
+  theme(
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    axis.text = element_text(size = 12, colour = "black"),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 11)
+  )
+
+```
+
+scatter plot of log2FC to gene length , but highlighting the differential signal status. note now the log2FC is refers to the average foldchange of TSS and genebody respectively. 
+
+```{r}
+#add pausing ratio and gene length to the TSS/genebody log2FC from diffsig
+scatter_diffsig_plot_df2 <- scatter_diffsig_plot_df %>% left_join(
+    hg38.genes %>% dplyr::select(gene_id, width),
+    by = "gene_id"
+  ) %>% dplyr::rename("length" ="width") %>%
+  left_join(pausingratio_csv_expanded_0h_baseline %>% dplyr::select(gene.name, log2_pausing_ratio), 
+            by = c("gene_name" = "gene.name")) %>%
+  mutate(
+    time = factor(time, levels = c("90min","8h"))
+  )
+
+
+
+#plot the scatter plots
+# TSS
+TSS_logFCvsgenelength_plot <- scatter_diffsig_plot_df2 %>%
+  filter(!is.na(length), length > 0) %>%
+  mutate(
+    length_bin = cut(
+      length,
+      breaks = quantile(length, probs = c(0, 1/3, 2/3, 1), na.rm = TRUE),
+      include.lowest = TRUE,
+      labels = c("Short", "Medium", "Long")
+    )
+  ) %>%
+  ggplot(aes(x = length, y = logFC_TSS, colour = colour_Genebody)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0) +
+  scale_x_log10() +
+  scale_colour_manual(
+    values = c("blue" = "blue", "red" = "red", "grey" = "grey"),
+    na.value = "grey"
+  ) +
+  facet_grid(time ~ length_bin, scales = "free_x") +
+  theme_bw() +
+  ggdag::remove_grid() +
+  labs(x = "log10 (gene length)")
+
+#density map overlap for logFC_TSS vs length 
+TSS_logFCvsgenelength_densityplot <- scatter_diffsig_plot_df2 %>%
+  filter(!is.na(length), !is.na(logFC_TSS), length > 0) %>%
+  mutate(
+    length_bin = cut(
+      length,
+      breaks = quantile(length, probs = c(0, 1/3, 2/3, 1), na.rm = TRUE),
+      include.lowest = TRUE,
+      labels = c("Short", "Medium", "Long")
+    )
+  ) %>%
+  ggplot(aes(x = length, y = logFC_TSS)) +
+  geom_bin2d(bins = 80) +
+  geom_hline(yintercept = 0) +
+  scale_x_log10() +
+  scale_fill_viridis_c() +
+  facet_grid(time ~ length_bin, scales = "free_x") +
+  labs(
+    x = "log10 (gene length)",
+    y = "logFC_TSS",
+    fill = "Gene density"
+  ) +
+  theme_bw() +
+  ggdag::remove_grid()
+
+#combine the two genebody plots together using patchwork
+TSS_logFCvsgenelength_plot/TSS_logFCvsgenelength_densityplot
+
+# Gene body
+genebody_logFCvsgenelength_plot <- scatter_diffsig_plot_df2 %>%
+  filter(!is.na(length), length > 0) %>%
+  mutate(
+    length_bin = cut(
+      length,
+      breaks = quantile(length, probs = c(0, 1/3, 2/3, 1), na.rm = TRUE),
+      include.lowest = TRUE,
+      labels = c("Short", "Medium", "Long")
+    )
+  ) %>%
+  ggplot(aes(x = length, y = logFC_Genebody, colour = colour_Genebody)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0) +
+  scale_x_log10() +
+  scale_colour_manual(
+    values = c("blue" = "blue", "red" = "red", "grey" = "grey"),
+    na.value = "grey"
+  ) +
+  facet_grid(time ~ length_bin, scales = "free_x")+
+  theme_bw() +
+  ggdag::remove_grid() + labs( x = "log10 (gene length)")
+
+
+#density map overlap for logFC_genebody vs length 
+genebody_logFCvsgenelength_densityplot <- scatter_diffsig_plot_df2 %>%
+  filter(!is.na(length), !is.na(logFC_Genebody), length > 0) %>%
+  mutate(
+    length_bin = cut(
+      length,
+      breaks = quantile(length, probs = c(0, 1/3, 2/3, 1), na.rm = TRUE),
+      include.lowest = TRUE,
+      labels = c("Short", "Medium", "Long")
+    )
+  ) %>%
+  ggplot(aes(x = length, y = logFC_Genebody)) +
+  geom_bin2d(bins = 80) +
+  geom_hline(yintercept = 0) +
+  scale_x_log10() +
+  scale_fill_viridis_c() +
+  facet_grid(time ~ length_bin, scales = "free_x") +
+  labs(
+    x = "log10 (gene length)",
+    y = "logFC_Genebody",
+    fill = "Gene density"
+  ) +
+  theme_bw() +
+  ggdag::remove_grid()
+
+#combine the two genebody plots together using patchwork
+genebody_logFCvsgenelength_plot/genebody_logFCvsgenelength_densityplot
+```
+
+ Now plot log2FC of TSS/genebody over pausing index
+ 
+```{r}
+#plot the scatter plots
+# TSS
+TSS_logFCvspausingindex_plot <- scatter_diffsig_plot_df2  %>%
+  ggplot(aes(x = log2_pausing_ratio, y = logFC_TSS, colour = colour_Genebody)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0) +
+  scale_colour_manual(
+    values = c("blue" = "blue", "red" = "red", "grey" = "grey"),
+    na.value = "grey"
+  ) +
+  facet_grid(time ~ .)+
+  theme_bw() +
+  ggdag::remove_grid() + labs( x = "log2 (pausing index at 0h)")
+
+#density map overlap for logFC_TSS vs length 
+TSS_logFCvspausingindex_densityplot <- scatter_diffsig_plot_df2 %>%
+  ggplot(aes(x = log2_pausing_ratio, y = logFC_TSS)) +
+  geom_bin2d(bins = 80) +
+  geom_hline(yintercept = 0) +
+  scale_fill_viridis_c() +
+  labs(
+    x = "log2 (pausing index at 0h)",
+    y = "logFC_TSS",
+    fill = "Gene density"
+  ) +facet_grid(time ~ .)+
+  theme_bw() +
+  ggdag::remove_grid()
+
+#combine the two genebody plots together using patchwork
+TSS_logFCvspausingindex_plot/TSS_logFCvspausingindex_densityplot
+
+# Gene body
+genebody_logFCvspausingindex_plot <- scatter_diffsig_plot_df2 %>%
+  ggplot(aes(x = log2_pausing_ratio, y = logFC_Genebody, colour = colour_Genebody)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0) +
+  scale_colour_manual(
+    values = c("blue" = "blue", "red" = "red", "grey" = "grey"),
+    na.value = "grey"
+  ) +facet_grid(time ~ .)+
+  theme_bw() +
+  ggdag::remove_grid() + labs( x = "log2 (pausing index at 0h)")
+
+
+#density map overlap for logFC_genebody vs length 
+genebody_logFCvspausingindex_densityplot <- scatter_diffsig_plot_df2 %>%
+  ggplot(aes(x = log2_pausing_ratio, y = logFC_Genebody)) +
+  geom_bin2d(bins = 80) +
+  geom_hline(yintercept = 0) +
+  scale_fill_viridis_c() +
+  labs(
+    x = "log2 (pausing index at 0h)",
+    y = "logFC_Genebody",
+    fill = "Gene density"
+  ) +facet_grid(time ~ .)+
+  theme_bw() +
+  ggdag::remove_grid()
+
+#combine the two genebody plots together using patchwork
+genebody_logFCvspausingindex_plot/genebody_logFCvspausingindex_densityplot
+```
+ 
+ 
+---
+promoter analysis of diff sig data
+---
+ 
+add the promoter type information onto the differential signal analysis data. As the gene sets enriched for TSS and gene body are different so we will investigate the promoter enrichment for both.
+```{r}
+
+#keeping only the TSS
+#diffsig_plot_df_TSS_only <- diffsig_plot_df %>% filter(dataset == "TSS")
+
+
+#calculate the percentage of promoter types from the differential signal TSS dataset
+diffsig_plot_df_perc <- diffsig_plot_df %>%
+  mutate(
+    promoter_type = coalesce(
+      promoter_type_NA,
+      promoter_type_1,
+      promoter_type_2,
+      promoter_type_3,
+      promoter_type_4
+    )
+  ) %>%
+  count(timepoint, dataset, colour, promoter_type) %>%
+  group_by(timepoint, colour) %>%
+  mutate(percent = round(n / sum(n) * 100, 2)) %>%
+  ungroup() %>%
+  dplyr::select(timepoint, dataset, promoter_type, colour, percent) %>%
+  pivot_wider(
+    names_from = colour,
+    values_from = percent,
+    values_fill = 0
+  )
+
+#now calculate the overall promoter percentage
+allgenes_promoter_perc <- all_promoters_enum %>%
+  count(promoter_type) %>%
+  mutate(
+    percent = sprintf("%.2f", n / sum(n) * 100)
+  ) %>%
+  arrange(desc(n))
+
+#combine the summary tables
+promoter_summary <-diffsig_plot_df_perc %>%
+  left_join(allgenes_promoter_perc, by = "promoter_type") %>% 
+  dplyr::select(-n) %>%dplyr::rename("all genes" = "percent") %>% 
+  dplyr::select(promoter_type, timepoint,dataset,last_col(), everything())
+
+#calculate promoter enrichment heatmap
+diff_sig_promoter_enrichment_heatmap_df <- promoter_summary %>% 
+  filter(promoter_type != "no promoter information") %>%
+  mutate(across(c(`all genes`, blue, grey, red), as.numeric)) %>%
+  pivot_longer(
+    cols = c(blue, grey, red),
+    names_to = "colour",
+    values_to = "percent"
+  ) %>%
+  group_by(timepoint, dataset, promoter_type) %>%
+  mutate(
+    enrichment = percent / `all genes`,
+    log2_enrichment = log2(enrichment)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    promoter_type = factor(
+      promoter_type,
+      levels = c(
+        "GC_box",
+        "CCAAT",
+        "Initiator",
+        "TATA"
+      )
+    )
+  )
+
+
+
+#plot promoter enrichment heatmap (all )
+promoter_enrichment_heatmap <-ggplot(
+  diff_sig_promoter_enrichment_heatmap_df,
+  aes(colour, promoter_type, fill = log2_enrichment)
+) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(log2_enrichment, 2)), size = 4) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "log2\nEnrichment"
+  ) +
+  facet_grid(dataset ~ timepoint) +
+  coord_equal() +
+  theme_bw() +
+  theme(
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    axis.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+
+
+#calculate using the grey genes as the background instead of all genes
+diff_sig_promoter_enrichment_heatmap_df_greybg  <- promoter_summary %>% 
+  filter(promoter_type != "no promoter information") %>%
+  mutate(across(c(grey, blue, red), as.numeric)) %>%
+  mutate(
+    blue_enrichment = blue / grey,
+    red_enrichment  = red / grey,
+    grey_enrichment = 1
+  ) %>%
+  pivot_longer(
+    cols = ends_with("_enrichment"),
+    names_to = "colour",
+    values_to = "enrichment"
+  ) %>%
+  mutate(
+    colour = sub("_enrichment", "", colour),
+    log2_enrichment = log2(enrichment)
+  )
+
+
+promoter_enrichment_greybg_heatmap <- ggplot(
+  diff_sig_promoter_enrichment_heatmap_df_greybg %>%
+    filter(colour != "grey"),
+  aes(colour, promoter_type, fill = log2_enrichment)
+) +
+  geom_tile(color = "white") +
+  geom_text(
+    aes(label = round(log2_enrichment, 2)),
+    size = 4
+  ) +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "log2\nEnrichment\n(vs grey)"
+  ) +
+  facet_grid(dataset ~ timepoint) +
+  coord_equal() +
+  theme_bw() +
+  theme(
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    axis.title = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+ 
