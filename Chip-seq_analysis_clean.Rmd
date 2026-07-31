@@ -357,7 +357,6 @@ metagene_plot.partial <- ggplot(combined.plot.partial, aes(x = bin, y = COV.norm
     "Input" = "darkgrey"
   )) +
   theme(text = element_text(family = "sans"),
-    legend.position = "none",
     plot.title = element_text(hjust = 0.5, size = 14),
     axis.text.x = element_text(size = 14, color = "black"),
     axis.text.y = element_text(size = 14, color = "black"),
@@ -369,7 +368,7 @@ metagene_plot.partial <- ggplot(combined.plot.partial, aes(x = bin, y = COV.norm
     panel.border = element_rect(color = "black", fill = NA, size = 1),
     panel.background = element_rect(fill = "white", colour = NA)
   ) +
-  remove_grid()
+  ggdag::remove_grid()
 
 ggsave("Supplementary figure 6A.pdf",
        plot = metagene_plot.partial,
