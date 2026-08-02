@@ -165,6 +165,148 @@ fi
 
 ```
 
+use the same mapping code for the genes metagene (refer to chip-seq_analysis_clean).
+```{r}
+avg_bed_pattern = "\\merged.clean.cov_lncrna.bed"
+
+list.files(path = "/Users/png/Desktop/ATV_lab_projects/Degron_RPB1_project_collab/chipseq_metagene", pattern = avg_bed_pattern, full.names = TRUE) %>%
+  walk(function(x) {
+    print(x)
+    
+    df <- read.table(x, header = FALSE) %>%
+      dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5)
+   
+    prefix <- str_remove(basename(x), "\\.[^.]*$")
+    
+    assign(paste0(prefix, "_5kb"), df, envir = .GlobalEnv)
+  })
+```
+
+
+normalise the coverage to generate the metagene plot
+```{r}
+
+#list all the dataframe which I wanted to loop
+lncrna_coverage_list <- list(
+  D8L4Y_0h = D8L4Y_0h_merged.clean.cov_lncrna_5kb,
+  D8L4Y_90min = D8L4Y_90min_merged.clean.cov_lncrna_5kb,
+  D8L4Y_8h = D8L4Y_8h_merged.clean.cov_lncrna_5kb,
+  Input = INP_0h_merged.clean.cov_lncrna_5kb
+)
+
+#create function to parse thrugh dataframes to calculate mean and sem then normalized all values to the first bin
+#this part is where the normalised signal to background comes in
+normalize_coverage <- function(df) {
+  df %>%
+    group_by(bin) %>%
+    summarise(
+      COV.mean = mean(COV),
+      SEM = sd(COV) / sqrt(n()),
+      .groups = "drop"
+    ) %>%
+    dplyr::mutate(
+      COV.norm = COV.mean / COV.mean[1], #normalisation to the background ie region upstream of the TSS
+      SEM.norm = SEM / COV.mean[1]
+    )
+}
+ 
+
+#lapply the function across all dataframes 
+lncrna_plot_list <- lapply(lncrna_coverage_list, normalize_coverage)
+
+#combine the individual dataframes into plots
+lncrna_combined.plot <- bind_rows(lncrna_plot_list, .id = "Sample")
+
+#make sure the legend is in the right order
+lncrna_combined.plot$Sample <- factor(
+  lncrna_combined.plot$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min", "D8L4Y_8h", "Input")
+)
+
+# plot the coverage plot
+lncrna_metagene_plot <- ggplot(lncrna_combined.plot, aes(x = bin, y = COV.norm, color = Sample, fill = Sample)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = COV.norm - SEM.norm, ymax = COV.norm + SEM.norm), alpha = 0.3, color = NA) +
+  scale_x_continuous(
+    breaks = c(1, 20, 40, 60, 80, 100),
+    labels = c("1" = "-5kb", "20" = "TSS", "40" = "33%", "60" = "66%", "80" = "TTS", "100" = "+5kb")
+  ) +
+  ylab("Normalised coverage (signal / background)") +
+  theme_bw() +
+  scale_color_manual(values = c( "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  theme(
+    aspect.ratio = 1,
+    axis.text.x = element_text(size = 11, hjust = 0.5),
+    axis.text.y = element_text(size = 11),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 12, face = "bold", vjust = 4),
+    plot.title = element_text(size = 15, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+#supplementary figure 6
+lncrna_combined.plot.partial <- lncrna_combined.plot %>% dplyr::filter(Sample != "D8L4Y_8h" )
+
+lncrna_combined.plot.partial$Sample <- factor(
+  lncrna_combined.plot.partial$Sample,
+  levels = c("D8L4Y_0h", "D8L4Y_90min","Input")
+)
+
+
+#metagene plot 90min vs 0h only
+
+lncrna_metagene_plot.partial <- ggplot(lncrna_combined.plot.partial, aes(x = bin, y = COV.norm, color = Sample, fill = Sample)) +
+  geom_line(size = 0.5) +
+  geom_ribbon(aes(ymin = COV.norm - SEM.norm, ymax = COV.norm + SEM.norm), alpha = 0.3, color = NA) +
+  scale_x_continuous(
+    breaks = c(1, 20, 40, 60, 80, 100),
+    labels = c("1" = "-5kb", "20" = "TSS", "40" = "33%", "60" = "66%", "80" = "TTS", "100" = "+5kb")
+  ) +
+  ylab("Normalised coverage (signal/background") +
+  theme_bw() +
+  scale_color_manual(values = c( "D8L4Y_0h" = "#F8766D",
+    "D8L4Y_90min" = "#00BA38",
+    "D8L4Y_8h" = "#619CFF",
+    "Input" = "darkgrey"
+  )) +
+  scale_color_manual(values = c( "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "D8L4Y_0h" = "gray24",
+    "D8L4Y_90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  theme(text = element_text(family = "sans"),
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+     axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 14),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) +
+  ggdag::remove_grid()
+
+
+
+```
 
 ---
 sRNA
@@ -410,4 +552,19 @@ sRNA_metagene_plot.partial <- ggplot(sRNA_combined.plot.partial, aes(x = bin, y 
 
 
 
+```
+
+---
+combine protein coding, sRNA and lncRNA metagene plots together
+---
+
+```{r}
+library(patchwork)
+
+#all three conditions
+sRNA_metagene_plot  + metagene_plot + lncrna_metagene_plot 
+
+
+#90mins and 0h ones only
+sRNA_metagene_plot.partial +metagene_plot.partial + lncrna_metagene_plot.partial
 ```
