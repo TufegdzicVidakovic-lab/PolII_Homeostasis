@@ -996,8 +996,13 @@ diffsig_tss_90min$gene_name[queryHits(hits_tss_90min)] <- gene.gr$gene_name[subj
 write_csv(diffsig_tss_90min, "diffsig_tss_90min_significant_score_metadata.csv")
 ```
 regenerate the MA plot with the new significance score rank
+the mean significance score was calculated after the plotting code then used to refine the annotation of the plot
 
 ```{r}
+#extract the relevant mean significance scorw
+tss_90min_gene_summary <- dfs_diff_sig_mean$tss_90min
+
+#plot the refined MA plot
 ggplot(diffsig_tss_90min, aes(x = logCPM, y = logFC)) +
 
   # Points coloured by signed significance score
@@ -1054,37 +1059,19 @@ ggplot(diffsig_tss_90min, aes(x = logCPM, y = logFC)) +
   hjust = 1.1,
   vjust = 1.5,
   label = paste0(
-    "P-value < 0.05 windows: ",
+    "Significant windows: ",
     sum(diffsig_tss_90min$PValue < 0.05, na.rm = TRUE),
     " / ",
     nrow(diffsig_tss_90min),
     "\n",
-    "P-value < 0.05 genes: ",
-    length(unique(
-      diffsig_tss_90min$gene_name[
-        diffsig_tss_90min$PValue < 0.05
-      ]
-    )),
-    " / ",
-    length(unique(
-      diffsig_tss_90min$gene_name
-    )),
+    "Genes after merging windows: ",
+    sum(!is.na(tss_90min_gene_summary$mean_signed_significance_score)),
     "\n",
-    "Genes with blue windows: ",
-    length(unique(
-      diffsig_tss_90min$gene_name[
-        diffsig_tss_90min$PValue < 0.05 &
-        diffsig_tss_90min$logFC < 0
-      ]
-    )),
+    "Genes with blue score: ",
+    sum(tss_90min_gene_summary$colour == "blue", na.rm = TRUE),
     "\n",
-    "Genes with red windows: ",
-    length(unique(
-      diffsig_tss_90min$gene_name[
-        diffsig_tss_90min$PValue < 0.05 &
-        diffsig_tss_90min$logFC > 0
-      ]
-    ))
+    "Genes with red score: ",
+    sum(tss_90min_gene_summary$colour == "red", na.rm = TRUE)
   )
 )+
 ggdag::remove_grid()
@@ -1136,6 +1123,11 @@ write_csv(diffsig_tss_8h, "diffsig_tss_8h_significant_score_metadata.csv")
 regenerate the MA plot with the new significance score rank
 
 ```{r}
+
+#extract the relevant mean significant score
+tss_8h_gene_summary <- dfs_diff_sig_mean$tss_8h
+
+#plot the refined MA plot
 ggplot(diffsig_tss_8h, aes(x = logCPM, y = logFC)) +
 
   # Points coloured by signed significance score
@@ -1192,35 +1184,19 @@ ggplot(diffsig_tss_8h, aes(x = logCPM, y = logFC)) +
   hjust = 1.1,
   vjust = 1.5,
   label = paste0(
-    "P-value < 0.05 windows: ",
+    "Significant windows: ",
     sum(diffsig_tss_8h$PValue < 0.05, na.rm = TRUE),
     " / ",
     nrow(diffsig_tss_8h),
     "\n",
-    "P-value < 0.05 genes: ",
-    length(unique(
-      diffsig_tss_8h$gene_name[
-        diffsig_tss_8h$PValue < 0.05
-      ]
-    )),
-    " / ",
-    length(unique(diffsig_tss_8h$gene_name)),
+    "Genes after merging windows: ",
+    sum(!is.na(tss_8h_gene_summary$mean_signed_significance_score)),
     "\n",
-    "Genes with blue windows: ",
-    length(unique(
-      diffsig_tss_8h$gene_name[
-        diffsig_tss_8h$PValue < 0.05 &
-        diffsig_tss_8h$logFC < 0
-      ]
-    )),
+    "Genes with blue score: ",
+    sum(tss_8h_gene_summary$colour == "blue", na.rm = TRUE),
     "\n",
-    "Genes with red windows: ",
-    length(unique(
-      diffsig_tss_8h$gene_name[
-        diffsig_tss_8h$PValue < 0.05 &
-        diffsig_tss_8h$logFC > 0
-      ]
-    ))
+    "Genes with red score: ",
+    sum(tss_8h_gene_summary$colour == "red", na.rm = TRUE)
   )
 )+
 ggdag::remove_grid()
@@ -1275,9 +1251,13 @@ diffsig_genebody_90min$gene_name[queryHits(hits_genebody_90min)] <- gene.gr$gene
 write_csv(diffsig_genebody_90min, "diffsig_genebody_90min_significant_score_metadata.csv")
 ```
 regenerate the MA plot with the new significance score rank
+the mean significance score was calculated after the MAplots
 
 ```{r}
+#extract the relevant mean significance score
+genebody_90min_gene_summary <- dfs_diff_sig_mean$genebody_90min
 
+#plot the refined MA plot
 ggplot(diffsig_genebody_90min, aes(x = logCPM, y = logFC)) +
 
   # Points coloured by signed significance score
@@ -1334,35 +1314,19 @@ ggplot(diffsig_genebody_90min, aes(x = logCPM, y = logFC)) +
   hjust = 1.1,
   vjust = 1.5,
   label = paste0(
-    "P-value < 0.05 windows: ",
+    "Significant windows: ",
     sum(diffsig_genebody_90min$PValue < 0.05, na.rm = TRUE),
     " / ",
     nrow(diffsig_genebody_90min),
     "\n",
-    "P-value < 0.05 genes: ",
-    length(unique(
-      diffsig_genebody_90min$gene_name[
-        diffsig_genebody_90min$PValue < 0.05
-      ]
-    )),
-    " / ",
-    length(unique(diffsig_genebody_90min$gene_name)),
+    "Genes after merging windows: ",
+    sum(!is.na(genebody_90min_gene_summary$mean_signed_significance_score)),
     "\n",
-    "Genes with blue windows: ",
-    length(unique(
-      diffsig_genebody_90min$gene_name[
-        diffsig_genebody_90min$PValue < 0.05 &
-        diffsig_genebody_90min$logFC < 0
-      ]
-    )),
+    "Genes with blue score: ",
+    sum(genebody_90min_gene_summary$colour == "blue", na.rm = TRUE),
     "\n",
-    "Genes with red windows: ",
-    length(unique(
-      diffsig_genebody_90min$gene_name[
-        diffsig_genebody_90min$PValue < 0.05 &
-        diffsig_genebody_90min$logFC > 0
-      ]
-    ))
+    "Genes with red score: ",
+    sum(genebody_90min_gene_summary$colour == "red", na.rm = TRUE)
   )
 ) +
 
@@ -1413,8 +1377,14 @@ diffsig_genebody_8h$gene_name[queryHits(hits_genebody_8h)] <- gene.gr$gene_name[
 write_csv(diffsig_genebody_8h, "diffsig_genebody_8h_significant_score_metadata.csv")
 ```
 regenerate the MA plot with the new significance score rank
+for annotation of number of genes, use mean significance score rank (calculated after this block of code then added to the plotting)
 
 ```{r}
+
+#extract the relevant mean significant score
+genebody_8h_gene_summary <- dfs_diff_sig_mean$genebody_8h
+
+#plot the refined MA plot
 ggplot(diffsig_genebody_8h, aes(x = logCPM, y = logFC)) +
 
   # Points coloured by signed significance score
@@ -1464,48 +1434,29 @@ ggplot(diffsig_genebody_8h, aes(x = logCPM, y = logFC)) +
     title = "Differential signal genebody MA plot with signed significance score (8h vs 0 h)"
   ) +
 
- annotate(
+annotate(
   "text",
   x = Inf,
   y = Inf,
   hjust = 1.1,
   vjust = 1.5,
   label = paste0(
-    "P-value < 0.05 windows: ",
+    "Significant windows: ",
     sum(diffsig_genebody_8h$PValue < 0.05, na.rm = TRUE),
     " / ",
     nrow(diffsig_genebody_8h),
     "\n",
-    "P-value < 0.05 genes: ",
-    length(unique(
-      diffsig_genebody_8h$gene_name[
-        diffsig_genebody_8h$PValue < 0.05
-      ]
-    )),
-    " / ",
-    length(unique(
-      diffsig_genebody_8h$gene_name
-    )),
+    "Genes after merging windows: ",
+    sum(!is.na(genebody_8h_gene_summary$mean_signed_significance_score)),
     "\n",
-    "Genes with blue windows: ",
-    length(unique(
-      diffsig_genebody_8h$gene_name[
-        diffsig_genebody_8h$PValue < 0.05 &
-        diffsig_genebody_8h$logFC < 0
-      ]
-    )),
+    "Genes with blue score: ",
+    sum(genebody_8h_gene_summary$colour == "blue", na.rm = TRUE),
     "\n",
-    "Genes with red windows: ",
-    length(unique(
-      diffsig_genebody_8h$gene_name[
-        diffsig_genebody_8h$PValue < 0.05 &
-        diffsig_genebody_8h$logFC > 0
-      ]
-    ))
+    "Genes with red score: ",
+    sum(genebody_8h_gene_summary$colour == "red", na.rm = TRUE)
   )
 ) +
-
-  ggdag::remove_grid()
+ggdag::remove_grid()
 ```
 
 ---
