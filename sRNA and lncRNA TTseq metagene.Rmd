@@ -1,0 +1,561 @@
+---
+title: "sRNA and lncRNA TT-seq metagene"
+author: "Pei Qin (Sabrina) Ng"
+date: "2026-07-31"
+output: html_document
+---
+
+
+---
+lncRNA metagene
+---
+
+```{r}
+#generate non-overlapping gene annotation (using Granges, rtracklayer , and genomicfeatures)
+gtf.dat <- import("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf")
+lncRNA.gr <- gtf.dat[gtf.dat$type  %in% "gene",]
+lncRNA.gr$gene.width <- GenomicRanges::width(lncRNA.gr)
+lncRNA.gr <- lncRNA.gr[lncRNA.gr$gene_biotype %in% "lncRNA"]
+
+lncRNA.gr <- keepSeqlevels(lncRNA.gr,c(as.character(1:22),"X","Y"),pruning.mode="coarse")
+#lncRNA.gr<- lncRNA.gr[width(lncRNA.gr) >1000]
+#convert to dataframe from this step 9Granges can be problematic)
+hg38.lncRNA <- as.data.frame(lncRNA.gr) %>% dplyr::rename("chr" = "seqnames") %>% mutate(chr = paste0("chr", chr))
+
+
+hg38.lncrna.all <- as.data.frame(hg38.lncRNA) %>% 
+              mutate(chr = paste0("chr", chr, "_hg38")) %>%
+              mutate(start = start - 1) %>%
+              mutate(length=end-start) 
+#16,917 (> 1kb), 17,268 (all gene length)
+
+
+# Select pos/neg strand genes; define flanking regions 
+#middle region of the metagene plot (redo using filtered bed)
+hg38.lncrna.bed.pos.mid.windows.all <- hg38.lncrna.all  %>% 
+                                  filter(strand=="+") %>% 
+                                  dplyr::select(chr, start, end, length)
+
+hg38.lncrna.bed.neg.mid.windows.all <- hg38.lncrna.all  %>% 
+                                  filter(strand=="-") %>% 
+                                  dplyr::select(chr, start, end, length)
+
+#flanking regions of the metagene plot (pre-TSS)
+hg38.lncrna.bed.pos.early.windows.all <- hg38.lncrna.all %>% 
+                                    filter(strand=="+") %>% 
+                                    mutate(start=start-5000,end=start+5000) %>% 
+                                    dplyr::select(chr, start, end, length) %>% 
+                                    filter(start>0)
+
+
+hg38.lncrna.bed.neg.early.windows.all <- hg38.lncrna.all  %>% 
+                                    filter(strand=="-") %>%
+                                    mutate(start=start-5000,end=start+5000) %>%
+                                    dplyr::select(chr, start, end, length) %>% 
+                                    filter(start>0)
+
+#flanking regions of the metagene plot (post-TES)
+hg38.lncrna.bed.pos.late.windows.all <- hg38.lncrna.all  %>% 
+                                   filter(strand=="+") %>% 
+                                   mutate(start=end,end=start+5000) %>% 
+                                   dplyr::select(chr, start, end, length) 
+
+
+hg38.lncrna.bed.neg.late.windows.all <- hg38.lncrna.all  %>% 
+                                   filter(strand=="-") %>% 
+                                   mutate(start=end,end=start+5000) %>% 
+                                   dplyr::select(chr, start, end, length)
+
+
+# Save files
+
+write.table(hg38.lncrna.bed.pos.mid.windows.all, "hg38.lncrna.pos.mid.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncrna.bed.neg.mid.windows.all, "hg38.lncrna.neg.mid.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+write.table(hg38.lncrna.bed.pos.early.windows.all, "hg38.lncrna.pos.early.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncrna.bed.neg.early.windows.all, "hg38.lncrna.neg.early.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+write.table(hg38.lncrna.bed.pos.late.windows.all, "hg38.lncrna.pos.late.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncrna.bed.neg.late.windows.all, "hg38.lncrna.neg.late.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+```
+
+use the same window splitting as in the gene metagene code then readjust the window numbers
+```{r}
+
+#bedtools makewindows -b hg38.lncrna.pos.mid.windows.bed -n 60 -i winnum > hg38.lncrna.pos.mid.windows.60w.bed
+#bedtools makewindows -b hg38.lncrna.neg.mid.windows.bed -n 60 -i winnum -reverse > hg38.lncrna.neg.mid.windows.60w.bed
+
+#bedtools makewindows -b hg38.lncrna.pos.early.windows.bed -n 20 -i winnum > hg38.lncrna.pos.early.windows.20w.bed
+#bedtools makewindows -b hg38.lncrna.neg.early.windows.bed -n 20 -i winnum -reverse > hg38.lncrna.neg.early.windows.20w.bed
+
+#bedtools makewindows -b hg38.lncrna.pos.late.windows.bed -n 20 -i winnum > hg38.lncrna.pos.late.windows.20w.bed
+#bedtools makewindows -b hg38.lncrna.neg.late.windows.bed -n 20 -i winnum -reverse > hg38.lncrna.neg.late.windows.20w.bed
+lncrna_TT_metagene_path <- "/Users/png/Desktop/ATV_lab_projects/Degron_RPB1_project_collab/TTseq_metagene/lncrna"
+
+
+hg38.lncrna.bed.pos.mid.windows.all <- read.table(
+  file.path(lncrna_TT_metagene_path, "hg38.lncrna.pos.mid.windows.60w.bed"),
+  header = FALSE
+) %>%
+  mutate(V4 = V4 + 20)
+
+hg38.lncrna.bed.neg.mid.windows.all <-  read.table(
+  file.path(lncrna_TT_metagene_path, "hg38.lncrna.neg.mid.windows.60w.bed"),
+  header = FALSE
+) %>%
+  mutate(V4 = V4 + 20) 
+
+hg38.lncrna.bed.pos.early.windows.all <- read.table(file.path(lncrna_TT_metagene_path, "hg38.lncrna.pos.early.windows.20w.bed"), header=FALSE)   
+
+hg38.lncrna.bed.neg.early.windows.all <- read.table(file.path(lncrna_TT_metagene_path,"hg38.lncrna.neg.early.windows.20w.bed"),header=FALSE) %>% 
+                                    mutate(V4=V4+80)  
+
+hg38.lncrna.bed.pos.late.windows.all <- read.table(file.path(lncrna_TT_metagene_path,"hg38.lncrna.pos.late.windows.20w.bed"),header=FALSE) %>%
+                                   mutate(V4=V4+80) 
+
+hg38.lncrna.bed.neg.late.windows.all <- read.table(file.path(lncrna_TT_metagene_path,"hg38.lncrna.neg.late.windows.20w.bed"),header=FALSE) 
+
+# Combine the corrected bed files 
+hg38.lncrna.corrected.all.bed <- rbind(hg38.lncrna.bed.pos.early.windows.all, hg38.lncrna.bed.pos.mid.windows.all, hg38.lncrna.bed.pos.late.windows.all,hg38.lncrna.bed.neg.early.windows.all, hg38.lncrna.bed.neg.mid.windows.all, hg38.lncrna.bed.neg.late.windows.all)
+hg38.lncrna.pos.corrected.all.bed <- rbind(hg38.lncrna.bed.pos.early.windows.all, hg38.lncrna.bed.pos.mid.windows.all, hg38.lncrna.bed.pos.late.windows.all)
+hg38.lncrna.neg.corrected.all.bed <- rbind(hg38.lncrna.bed.neg.early.windows.all, hg38.lncrna.bed.neg.mid.windows.all, hg38.lncrna.bed.neg.late.windows.all)
+
+# Save files
+write.table(hg38.lncrna.corrected.all.bed, "hg38.lncrna.corrected.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncrna.pos.corrected.all.bed, "hg38.lncrna.pos.corrected.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.lncrna.neg.corrected.all.bed, "hg38.lncrna.neg.corrected.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+```
+
+
+
+plot the metagene plot using spike-in normalisation factor bigwigs
+Once completed the mapping of the coverage onto the binned genome regions (in bed format), generate the plot (code from Ivan)
+
+
+```{r}
+
+### Plot 
+
+# Define sample names and corresponding file prefixes
+samples <- c("0h", "90min", "8h")
+prefixes <- c("0h", "90min", "8h")
+
+# Initialize empty list to store plot data frames
+plot_list_lncrna_TT <- list()
+
+for(i in seq_along(samples)) {
+  sample_name <- samples[i]
+  prefix <- prefixes[i]
+  
+  # Read forward and reverse coverage files and combine
+  coverage <- rbind(
+    read.table(file.path(lncrna_TT_metagene_path, paste0(prefix, "_spikein.norm._merged_hg38_fwd.lncrna.cov.bed")), header = FALSE),
+    read.table(file.path(lncrna_TT_metagene_path, paste0(prefix, "_spikein.norm._merged_hg38_rev.lncrna.cov.bed")), header = FALSE)
+  )
+  
+  # Rename columns
+  colnames(coverage) <- c("chr", "start", "end", "bin", "COV")
+  
+  # Add dist column
+  coverage <- coverage %>%
+    mutate(dist = (as.numeric(bin) - 1) * 0.0505050505)
+  
+  # Summarise mean and SEM by dist
+  plot_df_lncrna <- coverage %>%
+    group_by(dist) %>%
+    summarise(
+      COV.mean = mean(COV),
+      SEM = sd(COV)/sqrt(n())
+    ) %>%
+    mutate(Condition = case_when(
+      sample_name == "0h" ~ "0h",
+      sample_name == "90min" ~ "90min",
+      sample_name == "8h" ~ "8h"
+    ))
+  
+  # Store result in list
+  plot_list_lncrna_TT[[sample_name]] <- plot_df_lncrna
+}
+
+# Combine all plot data frames
+Total_lncrna.plot.TT <- bind_rows(plot_list_lncrna_TT)
+#only 0h and 90mins
+
+Total_lncrna.plot.TT_part <- Total_lncrna.plot.TT %>% filter(Condition != "8h")
+# Formatting for better aesthetics
+
+Total_lncrna.plot.TT$Condition <- factor(Total_lncrna.plot.TT$Condition, 
+                                     levels = c("0h", "90min", "8h"))
+
+Total_lncrna.plot.TT_part$Condition <- factor(Total_lncrna.plot.TT_part$Condition, 
+                                     levels = c("0h", "90min"))
+#Plot the metagene plot
+Total_lncrna.plot.TT_p <- Total_lncrna.plot.TT %>%
+  ggplot(aes(x = dist, y = COV.mean, color = Condition, fill = Condition)) +
+  geom_line(size = 1) +
+  scale_color_manual(values = c( "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "8h" = "darkgreen",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "8h" = "darkgreen",
+    "Input" = "darkgrey"
+  )) +
+  geom_ribbon(aes(ymin = COV.mean - SEM, ymax = COV.mean + SEM), alpha = 0.2, color = NA) +
+  #scale_color_manual(values = colors) +
+  #scale_fill_manual(values = colors) +
+  #scale_linetype_manual(values = line_types) + # Add this to set linetypes
+  scale_x_continuous(breaks = seq(0, 5, by = 1), 
+                     labels = c("0" = "-5kb", "1" = "TSS", "2" = "33%", "3" = "66%", "4" = "TTS", "5" = "+5kb")) +
+  guides(linetype = guide_legend(override.aes = list(fill = NA))) + # Adjust the legend for linetypes
+  xlab("Position") + ylab("Spike-in normalised coverage") + 
+  ggtitle("") +
+  theme_bw() +
+  theme(
+    #aspect.ratio = 1,
+    legend.title = element_text(size = 14, face = "bold"), 
+    legend.text = element_text(size = 10),
+    axis.text.x = element_text(size = 11, angle = 0, vjust = 0, hjust = 0.5),
+    axis.text.y = element_text(size = 11),
+    axis.title.x = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.title.y = element_text(size = 14, face = "bold", vjust = 2),
+    plot.title = element_text(size = 16, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    legend.background = element_blank(),
+    legend.key = element_blank()
+  ) +
+  guides(fill = "none") + ggtitle("TT-seq metagene plot for lncRNAs (spike-in normalised)") # Hide the fill legend
+
+
+#plot 90mins and 0h for lncrna
+Total_lncrna.plot.TT_part_plot <- Total_lncrna.plot.TT_part %>%
+  ggplot(aes(x = dist, y = COV.mean, color = Condition, fill = Condition)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = COV.mean - SEM, ymax = COV.mean + SEM), alpha = 0.2, color = NA) +
+  #scale_color_manual(values = colors) +
+  #scale_fill_manual(values = colors) +
+  #scale_linetype_manual(values = line_types) + # Add this to set linetypes
+  scale_x_continuous(breaks = seq(0, 5, by = 1), 
+                     labels = c("0" = "-5kb", "1" = "TSS", "2" = "33%", "3" = "66%", "4" = "TTS", "5" = "+5kb")) +
+  guides(linetype = guide_legend(override.aes = list(fill = NA))) + # Adjust the legend for linetypes
+  xlab("Position") + ylab("Spike-in normalised coverage") + 
+  ggtitle("") +
+  scale_color_manual(values = c( "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+ theme(text = element_text(family = "sans"),
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+     axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 14),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) 
+
+```
+
+
+
+---
+sRNA metagene
+---
+
+Generate non-overlapping annotations for make windows (all genes)
+
+```{r}
+library(GenomicRanges)
+library(rtracklayer)
+gtf.dat <- import("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf")
+srna.gr <- gtf.dat[gtf.dat$type  %in% "gene",]
+srna.gr$gene.width <- GenomicRanges::width(srna.gr)
+srna.gr<- srna.gr[srna.gr$gene_biotype %in% "snRNA"]
+srna.gr <- keepSeqlevels(srna.gr,c(as.character(1:22),"X","Y"),pruning.mode="coarse")
+srna.gr <- srna.gr[width(srna.gr ) >60]
+#convert to dataframe from this step 9Granges can be problematic)
+hg38.srna <- as.data.frame(srna.gr) %>% dplyr::rename("chr" = "seqnames") %>% mutate(chr = paste0("chr", chr))
+
+
+#convert to dataframe from this step 9Granges can be problematic)
+hg38.srna.all <- as.data.frame(hg38.srna) %>% 
+              mutate(chr = paste0("chr", chr, "_hg38")) %>%
+              mutate(start = start - 1) %>%
+              mutate(length=end-start) 
+#16,917 (> 1kb), 17,268 (all gene length)
+
+
+# Select pos/neg strand genes; define flanking regions 
+#middle region of the metagene plot (redo using filtered bed)
+hg38.srna.bed.pos.mid.windows.all <- hg38.srna.all  %>% 
+                                  filter(strand=="+") %>% 
+                                  dplyr::select(chr, start, end, length)
+
+hg38.srna.bed.neg.mid.windows.all <- hg38.srna.all  %>% 
+                                  filter(strand=="-") %>% 
+                                  dplyr::select(chr, start, end, length)
+
+#flanking regions of the metagene plot (pre-TSS)
+hg38.srna.bed.pos.early.windows.all <- hg38.srna.all %>% 
+                                    filter(strand=="+") %>% 
+                                    mutate(start=start-5000,end=start+5000) %>% 
+                                    dplyr::select(chr, start, end, length) %>% 
+                                    filter(start>0)
+
+
+hg38.srna.bed.neg.early.windows.all <- hg38.srna.all  %>% 
+                                    filter(strand=="-") %>%
+                                    mutate(start=start-5000,end=start+5000) %>%
+                                    dplyr::select(chr, start, end, length) %>% 
+                                    filter(start>0)
+
+#flanking regions of the metagene plot (post-TES)
+hg38.srna.bed.pos.late.windows.all <- hg38.srna.all  %>% 
+                                   filter(strand=="+") %>% 
+                                   mutate(start=end,end=start+5000) %>% 
+                                   dplyr::select(chr, start, end, length) 
+
+
+hg38.srna.bed.neg.late.windows.all <- hg38.srna.all  %>% 
+                                   filter(strand=="-") %>% 
+                                   mutate(start=end,end=start+5000) %>% 
+                                   dplyr::select(chr, start, end, length)
+
+
+# Save files
+
+write.table(hg38.srna.bed.pos.mid.windows.all, "hg38.srna.pos.mid.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.bed.neg.mid.windows.all, "hg38.srna.neg.mid.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+write.table(hg38.srna.bed.pos.early.windows.all, "hg38.srna.pos.early.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.bed.neg.early.windows.all, "hg38.srna.neg.early.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+write.table(hg38.srna.bed.pos.late.windows.all, "hg38.srna.pos.late.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.bed.neg.late.windows.all, "hg38.srna.neg.late.windows.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+
+ 
+```
+
+
+use the same window splitting as in the gene metagene code then readjust the window numbers
+```{r}
+
+#bedtools makewindows -b hg38.srna.pos.mid.windows.bed -n 60 -i winnum > hg38.srna.pos.mid.windows.60w.bed
+#bedtools makewindows -b hg38.srna.neg.mid.windows.bed -n 60 -i winnum -reverse > hg38.srna.neg.mid.windows.60w.bed
+
+#bedtools makewindows -b hg38.srna.pos.early.windows.bed -n 20 -i winnum > hg38.srna.pos.early.windows.20w.bed
+#bedtools makewindows -b hg38.srna.neg.early.windows.bed -n 20 -i winnum -reverse > hg38.srna.neg.early.windows.20w.bed
+
+#bedtools makewindows -b hg38.srna.pos.late.windows.bed -n 20 -i winnum > hg38.srna.pos.late.windows.20w.bed
+#bedtools makewindows -b hg38.srna.neg.late.windows.bed -n 20 -i winnum -reverse > hg38.srna.neg.late.windows.20w.bed
+sRNA_TT_metagene_path <- "/Users/png/Desktop/ATV_lab_projects/Degron_RPB1_project_collab/TTseq_metagene/srna"
+
+
+hg38.srna.bed.pos.mid.windows.all <- read.table(
+  file.path(sRNA_TT_metagene_path, "hg38.srna.pos.mid.windows.60w.bed"),
+  header = FALSE
+) %>%
+  mutate(V4 = V4 + 20)
+
+hg38.srna.bed.neg.mid.windows.all <-  read.table(
+  file.path(sRNA_TT_metagene_path, "hg38.srna.neg.mid.windows.60w.bed"),
+  header = FALSE
+) %>%
+  mutate(V4 = V4 + 20) 
+
+hg38.srna.bed.pos.early.windows.all <- read.table(file.path(sRNA_TT_metagene_path, "hg38.srna.pos.early.windows.20w.bed"), header=FALSE)   
+
+hg38.srna.bed.neg.early.windows.all <- read.table(file.path(sRNA_TT_metagene_path,"hg38.srna.neg.early.windows.20w.bed"),header=FALSE) %>% 
+                                    mutate(V4=V4+80)  
+
+hg38.srna.bed.pos.late.windows.all <- read.table(file.path(sRNA_TT_metagene_path,"hg38.srna.pos.late.windows.20w.bed"),header=FALSE) %>%
+                                   mutate(V4=V4+80) 
+
+hg38.srna.bed.neg.late.windows.all <- read.table(file.path(sRNA_TT_metagene_path,"hg38.srna.neg.late.windows.20w.bed"),header=FALSE) 
+
+# Combine the corrected bed files 
+hg38.srna.corrected.all.bed <- rbind(hg38.srna.bed.pos.early.windows.all, hg38.srna.bed.pos.mid.windows.all, hg38.srna.bed.pos.late.windows.all,hg38.srna.bed.neg.early.windows.all, hg38.srna.bed.neg.mid.windows.all, hg38.srna.bed.neg.late.windows.all)
+hg38.srna.pos.corrected.all.bed <- rbind(hg38.srna.bed.pos.early.windows.all, hg38.srna.bed.pos.mid.windows.all, hg38.srna.bed.pos.late.windows.all)
+hg38.srna.neg.corrected.all.bed <- rbind(hg38.srna.bed.neg.early.windows.all, hg38.srna.bed.neg.mid.windows.all, hg38.srna.bed.neg.late.windows.all)
+
+# Save files
+write.table(hg38.srna.corrected.all.bed, "hg38.srna.corrected.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.pos.corrected.all.bed, "hg38.srna.pos.corrected.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+write.table(hg38.srna.neg.corrected.all.bed, "hg38.srna.neg.corrected.bed", sep = "\t", quote = F, col.names = F, row.names = F)
+```
+
+
+plot the metagene plot using spike-in normalisation factor bigwigs
+Once completed the mapping of the coverage onto the binned genome regions (in bed format), generate the plot (code from Ivan)
+
+
+```{r}
+
+
+### Plot 
+
+# Define sample names and corresponding file prefixes
+samples <- c("0h", "90min", "8h")
+prefixes <- c("0h", "90min", "8h")
+
+# Initialize empty list to store plot data frames
+plot_list_srna_TT <- list()
+
+for(i in seq_along(samples)) {
+  sample_name <- samples[i]
+  prefix <- prefixes[i]
+  
+  # Read forward and reverse coverage files and combine
+  coverage <- rbind(
+    read.table(file.path(sRNA_TT_metagene_path, paste0(prefix, "_spikein.norm._merged_hg38_fwd.srna2.cov.bed")), header = FALSE),
+    read.table(file.path(sRNA_TT_metagene_path, paste0(prefix, "_spikein.norm._merged_hg38_rev.srna2.cov.bed")), header = FALSE)
+  )
+  
+  # Rename columns
+  colnames(coverage) <- c("chr", "start", "end", "bin", "COV")
+  
+  # Add dist column
+  coverage <- coverage %>%
+    mutate(dist = (as.numeric(bin) - 1) * 0.0505050505)
+  
+  # Summarise mean and SEM by dist
+  plot_df_srna <- coverage %>%
+    group_by(dist) %>%
+    summarise(
+      COV.mean = mean(COV),
+      SEM = sd(COV)/sqrt(n())
+    ) %>%
+    mutate(Condition = case_when(
+      sample_name == "0h" ~ "0h",
+      sample_name == "90min" ~ "90min",
+      sample_name == "8h" ~ "8h"
+    ))
+  
+  # Store result in list
+  plot_list_srna_TT[[sample_name]] <- plot_df_srna
+}
+
+# Combine all plot data frames
+Total_srna.plot.TT <- bind_rows(plot_list_srna_TT)
+#only 0h and 90mins
+
+Total_srna.plot.TT_part <- Total_srna.plot.TT %>% filter(Condition != "8h")
+# Formatting for better aesthetics
+
+Total_srna.plot.TT$Condition <- factor(Total_srna.plot.TT$Condition, 
+                                     levels = c("0h", "90min", "8h"))
+
+Total_srna.plot.TT_part$Condition <- factor(Total_srna.plot.TT_part$Condition, 
+                                     levels = c("0h", "90min"))
+#Plot the metagene plot
+Total_srna.plot.TT_p <- Total_srna.plot.TT %>%
+  ggplot(aes(x = dist, y = COV.mean, color = Condition, fill = Condition)) +
+  geom_line(size = 1) +
+  scale_color_manual(values = c( "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "8h" = "darkgreen",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "8h" = "darkgreen",
+    "Input" = "darkgrey"
+  )) +
+  geom_ribbon(aes(ymin = COV.mean - SEM, ymax = COV.mean + SEM), alpha = 0.2, color = NA) +
+  #scale_color_manual(values = colors) +
+  #scale_fill_manual(values = colors) +
+  #scale_linetype_manual(values = line_types) + # Add this to set linetypes
+  scale_x_continuous(breaks = seq(0, 5, by = 1), 
+                     labels = c("0" = "-5kb", "1" = "TSS", "2" = "33%", "3" = "66%", "4" = "TTS", "5" = "+5kb")) +
+  scale_y_continuous(limits = c(0,400))+
+  guides(linetype = guide_legend(override.aes = list(fill = NA))) + # Adjust the legend for linetypes
+  xlab("Position") + ylab("Spike-in normalised coverage") + 
+  ggtitle("") +
+  theme_bw() +
+  theme(
+    #aspect.ratio = 1,
+    legend.title = element_text(size = 14, face = "bold"), 
+    legend.text = element_text(size = 10),
+    axis.text.x = element_text(size = 11, angle = 0, vjust = 0, hjust = 0.5),
+    axis.text.y = element_text(size = 11),
+    axis.title.x = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.title.y = element_text(size = 14, face = "bold", vjust = 2),
+    plot.title = element_text(size = 16, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    legend.background = element_blank(),
+    legend.key = element_blank()
+  ) +
+  guides(fill = "none") + ggtitle("TT-seq metagene plot for sRNAs (spike-in normalised)") # Hide the fill legend
+
+
+#plot 90mins and 0h for sRNA
+Total_srna.plot.TT_part_plot <- Total_srna.plot.TT_part %>%
+  ggplot(aes(x = dist, y = COV.mean, color = Condition, fill = Condition)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = COV.mean - SEM, ymax = COV.mean + SEM), alpha = 0.2, color = NA) +
+  #scale_color_manual(values = colors) +
+  #scale_fill_manual(values = colors) +
+  #scale_linetype_manual(values = line_types) + # Add this to set linetypes
+  scale_x_continuous(breaks = seq(0, 5, by = 1), 
+                     labels = c("0" = "-5kb", "1" = "TSS", "2" = "33%", "3" = "66%", "4" = "TTS", "5" = "+5kb")) +
+  scale_y_continuous(limits = c(0,200))+
+  guides(linetype = guide_legend(override.aes = list(fill = NA))) + # Adjust the legend for linetypes
+  xlab("Position") + ylab("Spike-in normalised coverage") + 
+  ggtitle("") +
+  scale_color_manual(values = c( "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+  scale_fill_manual(values = c(
+     "0h" = "gray24",
+    "90min" = "dodgerblue3",
+    "Input" = "darkgrey"
+  )) +
+ theme(text = element_text(family = "sans"),
+    plot.title = element_text(hjust = 0.5, size = 14),
+    axis.text.x = element_text(size = 14, color = "black"),
+    axis.text.y = element_text(size = 14, color = "black"),
+     axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    strip.text.x = element_text(size = 14),
+    axis.ticks = element_line(colour = "black"),
+    axis.ticks.length = unit(0.2, "cm"),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    panel.background = element_rect(fill = "white", colour = NA)
+  ) 
+
+```
+
+
+---
+combine protein coding, sRNA and lncRNA metagene plots together
+---
+
+```{r}
+library(patchwork)
+
+#all three conditions
+Total_srna.plot.TT_p+TT_metagene_si_p+Total_lncrna.plot.TT_p 
+
+
+#90mins and 0h ones only
+Total_srna.plot.TT_part_plot +TT_metagene_si_p_part + Total_lncrna.plot.TT_part_plot
+```
+
