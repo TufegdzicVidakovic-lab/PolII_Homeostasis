@@ -1836,3 +1836,754 @@ library(patchwork)
   plot_layout(ncol = 2)
 ```
 
+Now regenerate the stratified boxplot but for TSS and gene body for two time points: 90min and 8h
+```{r}
+boxplot_data_alltimepoints <- cov_boxplot_dfs_norm %>%
+  dplyr::select(gene_id, hgnc_symbol, dataset, condition, coverage.fold) %>% filter(dataset != "TTS") %>%
+  pivot_wider(
+    names_from = c(dataset, condition),
+    values_from = coverage.fold
+  ) %>%
+  mutate(
+    TSS_log2FC_90min_0h = log2(TSS_D8L4Y_90min / TSS_D8L4Y_0h),
+    TSS_log2FC_8h_0h    = log2(TSS_D8L4Y_8h / TSS_D8L4Y_0h),
+
+    GeneBody_log2FC_90min_0h = log2(`Gene Body_D8L4Y_90min` / `Gene Body_D8L4Y_0h`),
+    GeneBody_log2FC_8h_0h    = log2(`Gene Body_D8L4Y_8h` / `Gene Body_D8L4Y_0h`)
+  )
+
+#add on the other metadata like gene length and pausing ratio (0h basepoint)
+metadata_boxplot_data_alltimepoints <- boxplot_data_alltimepoints%>%
+  left_join(pausingratio_csv_expanded_0h_baseline,
+            by = c("hgnc_symbol" = "gene.name")) %>%  
+  mutate(length_category = case_when(
+    length >= 1000  & length < 5000  ~ "1_5kb",
+    length >= 5000  & length < 10000 ~ "5_10kb",
+    length >= 10000 & length < 25000 ~ "10_25kb",
+    length >= 25000 & length < 50000 ~ "25_50kb",
+    length >= 50000 & length < 75000 ~ "50_75kb",
+    length >= 75000 ~ "75kb_plus",
+    TRUE ~ NA_character_
+  ))
+
+#get the log2FC summary for Ana
+log2fc_summary <- metadata_boxplot_data_alltimepoints  %>%   # replace with your dataframe name
+  summarise(
+    across(
+        c(
+    TSS_log2FC_90min_0h,
+    TSS_log2FC_8h_0h,
+    GeneBody_log2FC_90min_0h,
+    GeneBody_log2FC_8h_0h
+  ),
+      list(
+        positive = ~sum(. > 0, na.rm = TRUE),
+        zero     = ~sum(. == 0, na.rm = TRUE),
+        negative = ~sum(. < 0, na.rm = TRUE)
+      ),
+      .names = "{.col}_{.fn}"
+    )
+  ) %>%
+  pivot_longer(
+    everything(),
+    names_to = c("comparison", "direction"),
+    names_pattern = "(.*)_(positive|zero|negative)$",
+    values_to = "n_genes"
+  ) %>%
+  pivot_wider(
+    names_from = direction,
+    values_from = n_genes
+  )
+#> log2fc_summary
+# A tibble: 4 × 4
+#  comparison               positive  zero negative
+#  <chr>                       <int> <int>    <int>
+#1 TSS_log2FC_90min_0h          2353     0     7496
+#2 TSS_log2FC_8h_0h             4237     0     5612
+#3 GeneBody_log2FC_90min_0h     4412     0     4571
+#4 GeneBody_log2FC_8h_0h        4764     0     4219
+
+```
+
+1) log2FC vs gene length categories
+```{r}
+log2FC_length_alltimepoints_long_df <-metadata_boxplot_data_alltimepoints %>%
+  pivot_longer(
+    cols = c(
+      TSS_log2FC_90min_0h,
+      TSS_log2FC_8h_0h,
+      GeneBody_log2FC_90min_0h,
+      GeneBody_log2FC_8h_0h
+    ),
+    names_to = "comparison",
+    values_to = "log2FC"
+  ) %>%
+  tidyr::extract(
+    comparison,
+    into = c("dataset", "timepoint"),
+    regex = "(TSS|GeneBody)_log2FC_(.*)"
+  ) %>%
+  mutate(
+    dataset = factor(dataset, levels = c("TSS", "GeneBody")),
+    timepoint = factor(
+      timepoint,
+      levels = c("90min_0h", "8h_0h"),
+      labels = c("90 min / 0 h", "8 h / 0 h")
+    ),
+    length_category = factor(
+      length_category,
+      levels = c("1_5kb",
+        "5_10kb",
+        "10_25kb",
+        "25_50kb",
+        "50_75kb",
+        "75kb_plus"
+      )
+    )
+  )
+
+#plot TSS, Gene body, 90min and 8h timepoints
+length_all_plot <- ggplot(log2FC_length_alltimepoints_long_df ,
+       aes(x = length_category, y = log2FC)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "red") +
+  facet_wrap(dataset ~ timepoint, nrow =1) +
+  labs(
+    x = "Gene length category",
+    y = expression(log[2]~Fold~Change)
+  )+
+  theme_bw() +theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )+ggdag::remove_grid()
+```
+2)log2FC vs log2 pausing index
+
+```{r}
+log2FC_log2PI_alltimepoints_long_df <- metadata_boxplot_data_alltimepoints %>%
+  pivot_longer(
+    cols = c(
+      TSS_log2FC_90min_0h,
+      TSS_log2FC_8h_0h,
+      GeneBody_log2FC_90min_0h,
+      GeneBody_log2FC_8h_0h
+    ),
+    names_to = "comparison",
+    values_to = "log2FC"
+  ) %>%
+mutate(
+  pausing_bin = cut(
+    log2_pausing_ratio,
+    breaks = c(-Inf, -2, -1, 0, 1, 2, 3, 4, Inf),
+    labels = c(
+      "<-2",
+      "-2 to -1",
+      "-1 to 0",
+      "0 to 1",
+      "1 to 2",
+      "2 to 3",
+      "3 to 4",
+      "> 4"
+    ),
+    include.lowest = TRUE
+  )
+)%>%
+  tidyr::extract(
+    comparison,
+    into = c("dataset", "timepoint"),
+    regex = "(TSS|GeneBody)_log2FC_(.*)"
+  ) %>%
+  mutate(
+    dataset = factor(dataset, levels = c("TSS", "GeneBody")),
+    timepoint = factor(
+      timepoint,
+      levels = c("90min_0h", "8h_0h"),
+      labels = c("90 min / 0 h", "8 h / 0 h")
+    )
+  )
+
+
+
+pausing_index_0h_plots <- ggplot(log2FC_log2PI_alltimepoints_long_df, aes(x = pausing_bin, y = log2FC)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "red") +
+  facet_wrap(dataset~timepoint, nrow = 1) +
+  labs(
+    x = expression(log[2]~Pausing~Index),
+    y = expression(log[2]~Fold~Change)
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +ggdag::remove_grid()
+```
+
+
+3)log2FC vs different cut-offs of quartiles of logs(baseMean)
+
+```{r}
+n_quantiles <- 4   # change to 4, 8 or 10
+
+log2BM_quartiles_long_df <- metadata_boxplot_data_alltimepoints %>%
+  pivot_longer(
+    cols = c(
+      TSS_log2FC_90min_0h,
+      TSS_log2FC_8h_0h,
+      GeneBody_log2FC_90min_0h,
+      GeneBody_log2FC_8h_0h
+    ),
+    names_to = "comparison",
+    values_to = "log2FC"
+  ) %>%
+  mutate(
+    log2baseMean = log2(baseMean_90min_0h), #previously checked the basemean of 90min and 8h is almost the same
+    baseMean_bin = factor(
+      dplyr::ntile(log2baseMean, n_quantiles),
+      levels = 1:n_quantiles,
+      labels = paste0("Q", 1:n_quantiles)
+    )
+  )%>%
+  tidyr::extract(
+    comparison,
+    into = c("dataset", "timepoint"),
+    regex = "(TSS|GeneBody)_log2FC_(.*)"
+  ) %>%
+  mutate(
+    dataset = factor(dataset, levels = c("TSS", "GeneBody")),
+    timepoint = factor(
+      timepoint,
+      levels = c("90min_0h", "8h_0h"),
+      labels = c("90 min / 0 h", "8 h / 0 h")
+    )
+  )
+```
+
+plot the log2base Mean quartile plots
+```{r}
+
+#4 quartiles plot
+q4_log2BM_plot <- ggplot(log2BM_quartiles_long_df , aes(x = baseMean_bin, y = log2FC)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "red") +
+  facet_wrap(dataset ~ timepoint, nrow = 1) +
+  labs(
+    x = paste0("log2(baseMean) quartile (n = ", n_quantiles, ")"),
+    y = expression(log[2]~Fold~Change)
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)) + ggdag::remove_grid()
+
+#8 quartiles plot
+q8_log2BM_plot <- ggplot(log2BM_quartiles_long_df , aes(x = baseMean_bin, y = log2FC)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "red") +
+  facet_wrap(dataset ~ timepoint, nrow = 1) +
+  labs(
+    x = paste0("log2(baseMean) quartile (n = ", n_quantiles, ")"),
+    y = expression(log[2]~Fold~Change)
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1))+ ggdag::remove_grid()
+
+#10 quartile plot
+q10_log2BM_plot <- ggplot(log2BM_quartiles_long_df , aes(x = baseMean_bin, y = log2FC)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "red") +
+  facet_wrap(dataset ~ timepoint, nrow = 1) +
+  labs(
+    x = paste0("log2(baseMean) quartile (n = ", n_quantiles, ")"),
+    y = expression(log[2]~Fold~Change)
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1))+ ggdag::remove_grid()
+
+```
+
+
+4) log2FC vs promoter types
+check the breaks of log2FC:
+```{r}
+log2FC_promoter_long_df <- metadata_boxplot_data_alltimepoints %>%
+  mutate(
+    no_promoter_info = if_else(
+      if_all(
+        promoter_type_1:promoter_type_4,
+        is.na
+      ),
+      promoter_type_NA,
+      NA_character_
+    ),
+    promoter_type_1 = coalesce(promoter_type_1, no_promoter_info),
+    promoter_type_2 = coalesce(promoter_type_2, no_promoter_info),
+    promoter_type_3 = coalesce(promoter_type_3, no_promoter_info),
+    promoter_type_4 = coalesce(promoter_type_4, no_promoter_info)
+  ) %>%
+  dplyr::select(-no_promoter_info) %>%
+  pivot_longer(
+    cols = c(
+      TSS_log2FC_90min_0h,
+      TSS_log2FC_8h_0h,
+      GeneBody_log2FC_90min_0h,
+      GeneBody_log2FC_8h_0h
+    ),
+    names_to = "comparison",
+    values_to = "log2FC"
+  ) %>%
+  tidyr::extract(
+    comparison,
+    into = c("dataset", "timepoint"),
+    regex = "(TSS|GeneBody)_log2FC_(.*)"
+  ) %>%
+  pivot_longer(
+    cols = starts_with("promoter_type"),
+    names_to = "promoter_type",
+    values_to = "promoter"
+  ) %>%
+  filter(!is.na(promoter)) %>%
+  mutate(
+    dataset = factor(
+      dataset,
+      levels = c("TSS", "GeneBody")
+    ),
+    timepoint = factor(
+      timepoint,
+      levels = c("90min_0h", "8h_0h"),
+      labels = c("90 min / 0 h", "8 h / 0 h")
+    ),
+    promoter = factor(
+      promoter,
+      levels = c(
+        "CCAAT",
+        "GC_box",
+        "Initiator",
+        "TATA",
+        "no promoter information"
+      ),
+      labels = c(
+        "CCAAT",
+        "GC box",
+        "Initiator",
+        "TATA",
+        "no promoter information"
+      )
+    )
+  )
+```
+ plot the log2Fc vs promoter types boxplot
+```{r}
+promoter_boxplot <- ggplot(
+  log2FC_promoter_long_df,
+  aes(x = promoter, y = log2FC)
+) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  facet_grid(dataset ~ timepoint) +
+  labs(
+    x = "Promoter type",
+    y = expression(log[2]~Fold~Change)
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +ggdag::remove_grid()
+```
+ 
+ 
+test out different breaks of the promoter types
+```{r}
+log2fc_long <- metadata_boxplot_data_alltimepoints %>%
+  pivot_longer(
+    cols = c(
+      TSS_log2FC_90min_0h,
+      TSS_log2FC_8h_0h,
+      GeneBody_log2FC_90min_0h,
+      GeneBody_log2FC_8h_0h
+    ),
+    names_to = "comparison",
+    values_to = "log2FC"
+  ) %>%
+  mutate(
+    dataset = ifelse(grepl("^TSS", comparison), "TSS", "GeneBody"),
+    direction = ifelse(log2FC > 0, "up", "down")
+  ) %>%
+  filter(log2FC != 0) %>%
+  mutate(
+    n_bins = case_when(
+      dataset == "TSS" & direction == "down" ~ 4,
+      dataset == "TSS" & direction == "up" ~ 2,
+      dataset == "GeneBody" ~ 4
+    )
+  )
+
+
+log2fc_breakpoints <- log2fc_long %>%
+  group_by(dataset, comparison, direction, n_bins) %>%
+  summarise(
+    breaks = list(
+      quantile(
+        log2FC,
+        probs = seq(0, 1, length.out = n_bins[1] + 1),
+        na.rm = TRUE
+      )
+    ),
+    .groups = "drop"
+  )
+
+log2fc_breakpoints
+
+log2fc_bin_intervals <- log2fc_breakpoints %>%
+  mutate(
+    lower = purrr::map(breaks, ~head(.x, -1)),
+    upper = purrr::map(breaks, ~tail(.x, -1))
+  ) %>%
+  dplyr::select(dataset, comparison, direction, n_bins, lower, upper) %>%
+  tidyr::unnest(c(lower, upper)) %>%
+  group_by(dataset, comparison, direction) %>%
+  mutate(bin = paste0("Q", row_number())) %>%
+  ungroup()
+
+log2fc_bin_intervals
+
+#export the breaks test as excel
+
+library(openxlsx)
+
+# Split by timepoint
+log2fc_90min <- log2fc_bin_intervals %>%
+  filter(grepl("90min", comparison))
+
+log2fc_8h <- log2fc_bin_intervals %>%
+  filter(grepl("8h", comparison))
+
+# Export to Excel with separate sheets
+write.xlsx(
+  list(
+    "90min" = log2fc_90min,
+    "8h" = log2fc_8h
+  ),
+  file = "log2FC_bin_intervals.xlsx"
+)
+```
+
+Good we tried this, as you can see biologically there is very little difference between q2, 3 and 4, only q1 stands out in terms of marked difference in gene expression. Can you try selecting groups based on extent of logFC instead - top 10% (strongest responders), the next 20% (modest responders), the next 20% (weak responders)  and final 30% (close to no response). We can do this for both up and down and let’s see breakpoints again?
+
+for the ranking sectioning:
+Q1 = strongest responders (top 10%)
+
+Q2 = next 20% (10–30%)
+
+Q3 = next 20% (30–50%)
+
+Q4 = remaining 50% (50–100%)
+```{r}
+log2fc_long2 <- metadata_boxplot_data_alltimepoints %>%
+  pivot_longer(
+    cols = c(
+      TSS_log2FC_90min_0h,
+      TSS_log2FC_8h_0h,
+      GeneBody_log2FC_90min_0h,
+      GeneBody_log2FC_8h_0h
+    ),
+    names_to = "comparison",
+    values_to = "log2FC"
+  ) %>%
+  mutate(
+    dataset = ifelse(grepl("^TSS", comparison), "TSS", "GeneBody"),
+    direction = ifelse(log2FC > 0, "up", "down")
+  ) %>%
+  filter(log2FC != 0)
+
+response_groups <- log2fc_long2 %>%
+  group_by(dataset, comparison, direction) %>%
+  mutate(
+    abs_response = abs(log2FC),
+    rank_fraction = rank(-abs_response, ties.method = "first") / n(),
+    response_group = case_when(
+      rank_fraction <= 0.10 ~ "Q1",
+      rank_fraction <= 0.40 ~ "Q2",
+      TRUE ~ "Q3"
+    )
+  )  %>%
+  ungroup() %>%
+  tidyr::extract(
+    comparison,
+    into = c("dataset", "timepoint"),
+    regex = "(TSS|GeneBody)_log2FC_(.*)"
+  ) %>%
+  pivot_longer(
+    cols = starts_with("promoter_type"),
+    names_to = "promoter_type",
+    values_to = "promoter"
+  ) %>%
+  filter(!is.na(promoter)) %>%
+  mutate(
+    dataset = factor(
+      dataset,
+      levels = c("TSS", "GeneBody")
+    ),
+    timepoint = factor(
+      timepoint,
+      levels = c("90min_0h", "8h_0h"),
+      labels = c("90 min / 0 h", "8 h / 0 h")
+    ),
+    promoter = factor(
+      promoter,
+      levels = c(
+        "CCAAT",
+        "GC_box",
+        "Initiator",
+        "TATA",
+        "no promoter information"
+      ),
+      labels = c(
+        "CCAAT",
+        "GC box",
+        "Initiator",
+        "TATA",
+        "no promoter information"
+      )
+    )
+  )
+
+#10:20:20:50
+#      rank_fraction <= 0.10 ~ "Q1",
+#      rank_fraction <= 0.30 ~ "Q2",
+#      rank_fraction <= 0.50 ~ "Q3",
+#      TRUE ~ "Q4"
+#    )
+#  ) 
+
+
+#10:40:50
+ #response_group = case_when(
+  #    rank_fraction <= 0.10 ~ "Q1",
+  #    rank_fraction <= 0.40 ~ "Q2",
+  #    TRUE ~ "Q3"
+  #  )
+  #)
+#check the breakpoint limits
+response_breakpoints <- response_groups %>%
+  group_by(dataset, comparison, direction, response_group) %>%
+  summarise(
+    lower = min(log2FC, na.rm = TRUE),
+    upper = max(log2FC, na.rm = TRUE),
+    n_genes = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(dataset, comparison, direction, response_group)
+
+response_breakpoints
+
+#export as excel
+# Split by timepoint
+response_breakpoints_90min <- response_breakpoints %>%
+  filter(grepl("90min", comparison))
+
+response_breakpoints_8h <- response_breakpoints %>%
+  filter(grepl("8h", comparison))
+
+# Export to Excel
+write.xlsx(
+  list(
+    "90min" = response_breakpoints_90min,
+    "8h" = response_breakpoints_8h
+  ),
+  file = "log2FC_response_breakpoints_corrected.xlsx"
+)
+```
+
+generate the boxplots of log2FC vs the defined breakpoints
+```{r}
+
+#10:20:20:50 boxplot to promoter distribution
+promoter_type_by_sectioned_quartile_plot <- ggplot(
+  response_groups,
+  aes(x = promoter, y = log2FC, fill = response_group)
+) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  facet_grid(dataset ~ timepoint) +
+  labs(
+    x = "Promoter type",
+    y = expression(log[2]~Fold~Change),
+    fill = "Response group"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )+ scale_fill_discrete(
+    name = "Response strength (by log2FC)",
+    labels = c(
+      "Q1" = "Strong responders (top 10%)",
+      "Q2" = "Moderate responders (next 20%)",
+      "Q3" = "Weak responders (next 20%)",
+      "Q4" = "Low/no responders (remaining 50%)"
+    )
+  )
+
+
+#10:40:50
+promoter_type_by_sectioned_quartile_plot2 <- ggplot(
+  response_groups,
+  aes(x = promoter, y = log2FC, fill = response_group)
+) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  facet_grid(dataset ~ timepoint) +
+  labs(
+    x = "Promoter type",
+    y = expression(log[2]~Fold~Change),
+    fill = "Response group"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )+ scale_fill_discrete(
+    name = "Response strength (by log2FC)",
+    labels = c(
+      "Q1" = "Strong responders (top 10%)",
+      "Q2" = "Moderate responders (next 40%)",
+      "Q3" = "Weak responders (remaining 50%)"
+    )
+  )
+```
+
+Divide by up and down
+```{r}
+response_groups_dir <- log2fc_long2 %>%
+  mutate(
+    direction = case_when(
+      log2FC > 0 ~ "Up",
+      log2FC < 0 ~ "Down",
+      TRUE ~ "No change"
+    )
+  ) %>%
+  filter(direction != "No change") %>%   # optional: remove log2FC == 0
+  group_by(dataset, comparison, direction) %>%
+   mutate(
+    rank_fraction = case_when(
+      direction == "Up" ~ rank(-log2FC, ties.method = "first") / n(),
+      direction == "Down" ~ rank(log2FC, ties.method = "first") / n()
+    ),
+    response_group = case_when(
+      rank_fraction <= 0.10 ~ "Q1",
+      rank_fraction <= 0.30 ~ "Q2",
+      rank_fraction <= 0.50 ~ "Q3",
+     TRUE ~ "Q4"
+    )
+  ) %>%
+  ungroup()%>%
+  tidyr::extract(
+    comparison,
+    into = c("dataset", "timepoint"),
+    regex = "(TSS|GeneBody)_log2FC_(.*)"
+  ) %>%
+  pivot_longer(
+    cols = starts_with("promoter_type"),
+    names_to = "promoter_type",
+    values_to = "promoter"
+  ) %>%
+  filter(!is.na(promoter)) %>%
+  mutate(
+    dataset = factor(
+      dataset,
+      levels = c("TSS", "GeneBody")
+    ),
+    timepoint = factor(
+      timepoint,
+      levels = c("90min_0h", "8h_0h"),
+      labels = c("90 min / 0 h", "8 h / 0 h")
+    ),
+    promoter = factor(
+      promoter,
+      levels = c(
+        "CCAAT",
+        "GC_box",
+        "Initiator",
+        "TATA",
+        "no promoter information"
+      ),
+      labels = c(
+        "CCAAT",
+        "GC box",
+        "Initiator",
+        "TATA",
+        "no promoter information"
+      )
+    )
+  )
+```
+
+plot the plots separated by up and down
+```{r}
+
+#10:20:20:50
+promoter_type_by_sectioned_quartile_plot3 <- ggplot(
+  response_groups_dir,
+  aes(x = promoter, y = log2FC, fill = response_group)
+) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  facet_grid(direction + dataset ~ timepoint) +
+  labs(
+    x = "Promoter type",
+    y = expression(log[2]~Fold~Change),
+    fill = "Response group"
+  ) +
+  scale_fill_discrete(
+    name = "Response strength (by log2FC)",
+    labels = c(
+      "Q1" = "Strong responders (top 10%)",
+      "Q2" = "Moderate responders (next 20%)",
+      "Q3" = "Weak responders (next 20%)",
+      "Q4" = "Low/no responders (remaining 50%)"
+    )
+  )+
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+#10:40:50
+promoter_type_by_sectioned_quartile_plot4 <- ggplot(
+  response_groups_dir,
+  aes(x = promoter, y = log2FC, fill = response_group)
+) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed"
+  ) +
+  facet_grid(direction + dataset ~ timepoint) +
+  labs(
+    x = "Promoter type",
+    y = expression(log[2]~Fold~Change),
+    fill = "Response group"
+  ) +
+  scale_fill_discrete(
+    name = "Response strength",
+    labels = c(
+      "Q1" = "Top 10% within Up/Down",
+      "Q2" = "Next 30% within Up/Down",
+      "Q3" = "Remaining 60% within Up/Down"
+    )
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
