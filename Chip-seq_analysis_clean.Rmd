@@ -1955,6 +1955,39 @@ length_all_plot <- ggplot(log2FC_length_alltimepoints_long_df ,
   theme_bw() +theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )+ggdag::remove_grid()
+
+#run stats
+
+stats_results_length <- log2FC_length_alltimepoints_long_df %>%
+  group_by(dataset, timepoint) %>%
+  group_modify(~{
+    model <- aov(log2FC ~ length_category, data = .x)
+    
+    tukey <- TukeyHSD(model)$length_category
+    
+    as.data.frame(tukey) %>%
+      tibble::rownames_to_column("comparison")
+  })
+
+sig_results_length <- stats_results_length %>%
+  filter(`p adj` < 0.05)
+
+sig_results_length <- sig_results_length %>%
+  mutate(significance = case_when(
+    `p adj` < 0.0001 ~ "****",
+    `p adj` < 0.001  ~ "***",
+    `p adj` < 0.01   ~ "**",
+    `p adj` < 0.05   ~ "*"
+  ))
+
+#export as excel
+library(openxlsx)
+
+write.xlsx(
+  sig_results_length,
+  file = "stats_results_length_Tukey_results.xlsx",
+  rowNames = FALSE
+)
 ```
 2)log2FC vs log2 pausing index
 
@@ -2015,13 +2048,45 @@ pausing_index_0h_plots <- ggplot(log2FC_log2PI_alltimepoints_long_df, aes(x = pa
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   ) +ggdag::remove_grid()
+
+#run stats 
+stats_results_PI <- log2FC_log2PI_alltimepoints_long_df %>%
+  group_by(dataset, timepoint) %>%
+  group_modify(~{
+    model <- aov(log2FC ~ pausing_bin, data = .x)
+    
+    tukey <- TukeyHSD(model)$pausing_bin
+    
+    as.data.frame(tukey) %>%
+      tibble::rownames_to_column("comparison")
+  })
+
+sig_results_PI <- stats_results_PI %>%
+  filter(`p adj` < 0.05) %>%
+  mutate(
+    significance = case_when(
+      `p adj` < 0.0001 ~ "****",
+      `p adj` < 0.001  ~ "***",
+      `p adj` < 0.01   ~ "**",
+      `p adj` < 0.05   ~ "*"
+    )
+  )
+
+#export the excel
+library(openxlsx)
+
+write.xlsx(
+  sig_results_PI,
+  file = "stats_results_pausing_index_Tukey_results.xlsx",
+  rowNames = FALSE
+)
 ```
 
 
 3)log2FC vs different cut-offs of quartiles of logs(baseMean)
 
 ```{r}
-n_quantiles <- 4   # change to 4, 8 or 10
+n_quantiles <- 8   # change to 4, 8 or 10
 
 log2BM_quartiles_long_df <- metadata_boxplot_data_alltimepoints %>%
   pivot_longer(
@@ -2099,6 +2164,38 @@ q10_log2BM_plot <- ggplot(log2BM_quartiles_long_df , aes(x = baseMean_bin, y = l
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1))+ ggdag::remove_grid()
 
+
+#run stats
+stats_results_BM <- log2BM_quartiles_long_df %>%
+  group_by(dataset, timepoint) %>%
+  group_modify(~{
+    model <- aov(log2FC ~ baseMean_bin, data = .x)
+    
+    tukey <- TukeyHSD(model)$baseMean_bin
+    
+    as.data.frame(tukey) %>%
+      tibble::rownames_to_column("comparison")
+  })
+
+
+sig_results_BM <- stats_results_BM %>%
+  filter(`p adj` < 0.05) %>%
+  mutate(
+    significance = case_when(
+      `p adj` < 0.0001 ~ "****",
+      `p adj` < 0.001  ~ "***",
+      `p adj` < 0.01   ~ "**",
+      `p adj` < 0.05   ~ "*"
+    )
+  )
+
+library(openxlsx)
+
+write.xlsx(
+  sig_results_BM,
+  file = "stats_results_log2baseMean_Tukey_results.xlsx",
+  rowNames = FALSE
+)
 ```
 
 
@@ -2171,7 +2268,8 @@ log2FC_promoter_long_df <- metadata_boxplot_data_alltimepoints %>%
     )
   )
 ```
- plot the log2Fc vs promoter types boxplot
+
+plot the log2Fc vs promoter types boxplot
 ```{r}
 promoter_boxplot <- ggplot(
   log2FC_promoter_long_df,
@@ -2191,6 +2289,60 @@ promoter_boxplot <- ggplot(
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   ) +ggdag::remove_grid()
+
+
+#changing layout to match the previous plots
+ggplot(
+  log2FC_promoter_long_df,
+  aes(x = promoter, y = log2FC)
+) +
+  geom_boxplot() +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    colour = "red"
+  ) +
+  facet_wrap(dataset ~ timepoint, nrow = 1) +
+  labs(
+    x = "Promoter type",
+    y = expression(log[2]~Fold~Change)
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  ggdag::remove_grid()
+#run stats
+stats_results_promoter <- log2FC_promoter_long_df %>%
+  group_by(dataset, timepoint) %>%
+  group_modify(~{
+    model <- aov(log2FC ~ promoter, data = .x)
+    
+    tukey <- TukeyHSD(model)$promoter
+    
+    as.data.frame(tukey) %>%
+      tibble::rownames_to_column("comparison")
+  })
+
+
+sig_results_promoter <- stats_results_promoter %>%
+  filter(`p adj` < 0.05) %>%
+  mutate(
+    significance = case_when(
+      `p adj` < 0.0001 ~ "****",
+      `p adj` < 0.001  ~ "***",
+      `p adj` < 0.01   ~ "**",
+      `p adj` < 0.05   ~ "*"
+    )
+  )
+
+library(openxlsx)
+
+write.xlsx(
+  sig_results_promoter,
+  file = "stats_results_promoter_Tukey_results.xlsx",
+  rowNames = FALSE
+)
 ```
  
  
@@ -2304,11 +2456,12 @@ response_groups <- log2fc_long2 %>%
     abs_response = abs(log2FC),
     rank_fraction = rank(-abs_response, ties.method = "first") / n(),
     response_group = case_when(
-      rank_fraction <= 0.10 ~ "Q1",
-      rank_fraction <= 0.40 ~ "Q2",
-      TRUE ~ "Q3"
+       rank_fraction <= 0.10 ~ "Q1",
+     rank_fraction <= 0.30 ~ "Q2",
+      rank_fraction <= 0.50 ~ "Q3",
+      TRUE ~ "Q4"
     )
-  )  %>%
+  )   %>%
   ungroup() %>%
   tidyr::extract(
     comparison,
@@ -2477,10 +2630,9 @@ response_groups_dir <- log2fc_long2 %>%
       direction == "Down" ~ rank(log2FC, ties.method = "first") / n()
     ),
     response_group = case_when(
-      rank_fraction <= 0.10 ~ "Q1",
-      rank_fraction <= 0.30 ~ "Q2",
-      rank_fraction <= 0.50 ~ "Q3",
-     TRUE ~ "Q4"
+         rank_fraction <= 0.10 ~ "Q1",
+      rank_fraction <= 0.40 ~ "Q2",
+      TRUE ~ "Q3"
     )
   ) %>%
   ungroup()%>%
@@ -2585,5 +2737,301 @@ promoter_type_by_sectioned_quartile_plot4 <- ggplot(
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
+```
+
+
+flip the x and y axis and group the quartiles together
+
+```{r}
+ggplot(
+  response_groups_dir,
+  aes(x = log2FC, y = promoter, fill = response_group)
+) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+   facet_grid(response_group ~ direction + dataset ~ timepoint) +
+  labs(
+    x = expression(log[2]~Fold~Change),
+    y = "Promoter type",
+    fill = "Response group"
+  ) +
+  scale_fill_discrete(
+    name = "Response strength (by log2FC)",
+    labels = c(
+      "Q1" = "Strong responders (top 10%)",
+      "Q2" = "Moderate responders (next 20%)",
+      "Q3" = "Weak responders (next 20%)",
+      "Q4" = "Low/no responders (remaining 50%)"
+    )
+  ) +
+  theme_bw()
+
+
+#run stats
+
+stats_results_promoter_response <- response_groups_dir %>%
+  group_by(response_group, direction, dataset, timepoint) %>%
+  group_modify(~{
+    model <- aov(log2FC ~ promoter, data = .x)
+    
+    tukey <- TukeyHSD(model)$promoter
+    
+    as.data.frame(tukey) %>%
+      tibble::rownames_to_column("comparison")
+  })
+
+sig_results_promoter_response <- stats_results_promoter_response %>%
+  filter(`p adj` < 0.05) %>%
+  mutate(
+    significance = case_when(
+      `p adj` < 0.0001 ~ "****",
+      `p adj` < 0.001  ~ "***",
+      `p adj` < 0.01   ~ "**",
+      `p adj` < 0.05   ~ "*"
+    )
+  )
+
+
+write.xlsx(
+  sig_results_promoter_response,
+  "promoter_response_group_significant_results_3quartiles.xlsx",
+  rowNames = FALSE
+)
+```
+
+length category
+
+```{r}
+
+response_groups_dir <- response_groups_dir %>% 
+  mutate(
+    dataset = factor(dataset, levels = c("TSS", "GeneBody")),
+    timepoint = factor(
+      timepoint,
+      levels = c("90min_0h", "8h_0h"),
+      labels = c("90 min / 0 h", "8 h / 0 h")
+    ),
+    length_category = factor(
+      length_category,
+      levels = c("1_5kb",
+        "5_10kb",
+        "10_25kb",
+        "25_50kb",
+        "50_75kb",
+        "75kb_plus"
+      )
+    )
+  )
+
+ggplot(
+  response_groups_dir,
+  aes(x = log2FC, y = length_category, fill = response_group)
+) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+  facet_grid(response_group ~ direction + dataset ~ timepoint) +
+  labs(
+    x = expression(log[2]~Fold~Change),
+    y = "Gene length category",
+    fill = "Response group"
+  ) +
+  scale_fill_discrete(
+    name = "Response strength (by log2FC)",
+    labels = c(
+      "Q1" = "Strong responders (top 10%)",
+      "Q2" = "Moderate responders (next 40%)",
+      "Q3" = "Weak responders (remaining 50%)"
+    )
+  ) +
+  theme_bw()
+
+
+#run stats
+stats_results_length_response <-  response_groups_dir %>%
+  group_by(response_group, direction, dataset, timepoint) %>%
+  group_modify(~{
+    model <- aov(log2FC ~ length_category, data = .x)
+    
+    tukey <- TukeyHSD(model)$length_category
+    
+    as.data.frame(tukey) %>%
+      tibble::rownames_to_column("comparison")
+  })
+
+
+sig_results_length_response <- stats_results_length_response %>%
+  filter(`p adj` < 0.05) %>%
+  mutate(
+    significance = case_when(
+      `p adj` < 0.0001 ~ "****",
+      `p adj` < 0.001  ~ "***",
+      `p adj` < 0.01   ~ "**",
+      `p adj` < 0.05   ~ "*"
+    )
+  )
+
+
+write.xlsx(
+  sig_results_length_response,
+  "length_response_group_significant_results_3quartile.xlsx",
+  rowNames = FALSE
+)
+```
+
+log2baseMean
+```{r}
+#add log2 basemean to the new log2FC quartile 
+response_groups_dir <- response_groups_dir %>%
+  group_by(dataset, timepoint) %>%
+  mutate(
+    log2baseMean =log2(baseMean_90min_0h +1),
+    log2baseMean_bin = ntile(log2baseMean, 4),
+    log2baseMean_bin = paste0("Q", log2baseMean_bin)
+  ) %>%
+  ungroup()
+
+#generate the plot
+ggplot(
+  response_groups_dir,
+  aes(x = log2FC, y = log2baseMean, fill = response_group)
+) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+  facet_grid(response_group ~ direction + dataset ~ timepoint) +
+  labs(
+    x = expression(log[2]~Fold~Change),
+    y = expression(log[2]~baseMean~category),
+    fill = "Response group"
+  ) +
+  scale_fill_discrete(
+    name = "Response strength (by log2FC)",
+    labels = c(
+      "Q1" = "Strong responders (top 10%)",
+      "Q2" = "Moderate responders (next 40%)",
+      "Q3" = "Weak responders (remaining 50%)"
+    )
+  )  +
+  theme_bw()
+
+
+stats_results_BM_response <- response_groups_dir %>%
+  group_by(response_group, direction, dataset, timepoint) %>%
+  group_modify(~{
+    model <- aov(log2FC ~ log2baseMean_bin, data = .x)
+    
+    tukey <- TukeyHSD(model)$log2baseMean_bin
+    
+    as.data.frame(tukey) %>%
+      tibble::rownames_to_column("comparison")
+  })
+
+sig_results_BM_response <- stats_results_BM_response %>%
+  filter(`p adj` < 0.05) %>%
+  mutate(
+    significance = case_when(
+      `p adj` < 0.0001 ~ "****",
+      `p adj` < 0.001  ~ "***",
+      `p adj` < 0.01   ~ "**",
+      `p adj` < 0.05   ~ "*"
+    )
+  )
+
+
+write.xlsx(
+  sig_results_BM_response,
+  "baseMean_response_group_significant_results_3quartile.xlsx",
+  rowNames = FALSE
+)
+```
+
+log2 pausing index
+```{r}
+
+#create pausing bin for the response group
+response_groups_dir <- response_groups_dir %>%
+  mutate(
+    pausing_bin = cut(
+      log2_pausing_ratio,
+      breaks = c(-Inf, -2, -1, 0, 1, 2, 3, 4, Inf),
+      labels = c(
+        "<-2",
+        "-2 to -1",
+        "-1 to 0",
+        "0 to 1",
+        "1 to 2",
+        "2 to 3",
+        "3 to 4",
+        "> 4"
+      ),
+      include.lowest = TRUE
+    )
+  )
+
+#plot thebox plot by pausing index bin
+ggplot(
+  response_groups_dir,
+  aes(x = log2FC, y = pausing_bin, fill = response_group)
+) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+  facet_grid(response_group ~ direction + dataset ~ timepoint) +
+  labs(
+    x = expression(log[2]~Fold~Change),
+    y = expression(log[2]~Pausing~Index~category),
+    fill = "Response group"
+  ) +
+  scale_fill_discrete(
+    name = "Response strength (by log2FC)",
+    labels = c(
+      "Q1" = "Strong responders (top 10%)",
+      "Q2" = "Moderate responders (next 40%)",
+      "Q3" = "Weak responders (remaining 50%)"
+    )
+  ) +
+  theme_bw()
+
+
+#run stats
+stats_results_PI_response <- response_groups_dir %>%
+  group_by(response_group, direction, dataset, timepoint) %>%
+  group_modify(~{
+    model <- aov(log2FC ~ pausing_bin, data = .x)
+    
+    tukey <- TukeyHSD(model)$pausing_bin
+    
+    as.data.frame(tukey) %>%
+      tibble::rownames_to_column("comparison")
+  })
+
+
+sig_results_PI_response <- stats_results_PI_response %>%
+  filter(`p adj` < 0.05) %>%
+  mutate(
+    significance = case_when(
+      `p adj` < 0.0001 ~ "****",
+      `p adj` < 0.001  ~ "***",
+      `p adj` < 0.01   ~ "**",
+      `p adj` < 0.05   ~ "*"
+    )
+  )
+
+
+write.xlsx(
+  sig_results_PI_response,
+  "pausing_index_response_group_significant_results_3quartiles.xlsx",
+  rowNames = FALSE
+)
 ```
 
