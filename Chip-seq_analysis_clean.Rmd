@@ -1619,6 +1619,35 @@ pausingratio_csv <- pausingratio_csv %>% rename(gene_name = gene.name ) %>%
 
 pausingratio_csv <- pausingratio_csv  %>% mutate(baseMean_8h_0h = results_8hvs0h$baseMean[match(gene_name, results_8hvs0h$gene_name)])
 
+
+#define the list of promoters
+promoter_bed_pattern = "\\_promoters_2.bed"
+
+#read in the promoter files, use map to retain each object read in the global environment
+promoter_files <- list.files(pattern = promoter_bed_pattern)
+
+#red in the promoter files
+#use walk to read in then discard the reading once it has been assigned properly with the correct name to the R global environment
+list.files(pattern = promoter_bed_pattern) %>%
+  walk(function(x) {
+    print(x)
+    
+    df <- readr::read_delim(x, col_names = FALSE, delim = "\t") 
+    df_clean <- df %>%
+      dplyr::rename(chr = X1, start = X2, end = X3, gene.name = X4, strand = X6) %>% 
+      select(-X5) %>%
+      mutate(promoter_type = str_remove(basename(x), "_promoters_2.bed"))
+    
+    assign(str_remove(basename(x), ".bed"), df_clean, envir = .GlobalEnv)
+  })
+
+#combine the dataframe together (note some genes have more than one promoter, so for this case, the many to many matches is valid)
+
+all_promoters <- promoter_files %>%
+  str_remove(".bed") %>%                     # match object names you created
+  map(get) %>%                               # fetch dataframes from global env
+  bind_rows()                          # rowbind everything
+
 #add promoter informatiom
 # First, enumerate promoters per gene in all_promoters
 all_promoters_enum <- all_promoters %>%
@@ -2344,7 +2373,129 @@ write.xlsx(
   rowNames = FALSE
 )
 ```
- 
+Additional request from Scott, combine all the four plots which made it into the supplementary figure as part of one metadata
+```{r}
+metadata_boxplot_data_alltimepoints2 <- metadata_boxplot_data_alltimepoints %>%
+  rowwise() %>%
+  mutate(
+    promoter = {
+      x <- c_across(promoter_type_1:promoter_type_4)
+      x <- x[!is.na(x) & x != ""]
+      
+      if (length(x) == 0) {
+        promoter_type_NA
+      } else {
+        paste(unique(x), collapse = "; ")
+      }
+    }
+  ) %>%
+  ungroup() %>%
+  
+  mutate(
+    log2baseMean = log2(baseMean_90min_0h),
+
+    baseMean_bin = factor(
+      dplyr::ntile(log2baseMean, 8),
+      levels = 1:8,
+      labels = paste0("Q", 1:8)
+    ),
+
+    pausing_bin = cut(
+      log2_pausing_ratio,
+      breaks = c(-Inf, -2, -1, 0, 1, 2, 3, 4, Inf),
+      labels = c(
+        "<-2",
+        "-2 to -1",
+        "-1 to 0",
+        "0 to 1",
+        "1 to 2",
+        "2 to 3",
+        "3 to 4",
+        "> 4"
+      ),
+      include.lowest = TRUE
+    ),
+
+    length_category = factor(
+      length_category,
+      levels = c(
+        "1_5kb",
+        "5_10kb",
+        "10_25kb",
+        "25_50kb",
+        "50_75kb",
+        "75kb_plus"
+      ),
+      labels = c(
+        "1–5 kb",
+        "5–10 kb",
+        "10–25 kb",
+        "25–50 kb",
+        "50–75 kb",
+        ">75 kb"
+      )
+    )
+  ) %>%
+
+  select(
+    -c(
+      promoter_type_NA,
+      promoter_type_1,
+      promoter_type_2,
+      promoter_type_3,
+      promoter_type_4
+    )
+  ) %>%
+
+  rename(
+    gene_name = hgnc_symbol,
+    "GeneBody_cov_D8L4Y_0h" = "Gene Body_D8L4Y_0h",
+    "TSS_cov_D8L4Y_0h" = "TSS_D8L4Y_0h",
+    "GeneBody_cov_D8L4Y_8h" = "Gene Body_D8L4Y_8h",
+    "TSS_cov_D8L4Y_8h" = "TSS_D8L4Y_8h",
+    "GeneBody_cov_D8L4Y_90min" = "Gene Body_D8L4Y_90min",
+    "TSS_cov_D8L4Y_90min" = "TSS_D8L4Y_90min"
+  )
+
+write_csv(metadata_boxplot_data_alltimepoints2, "metadata_boxplot_data_all_figureS7_v2.csv")
+```
+
+Sanity check: see if this dataset corresponds to the histogram in Figure 3C (yes)
+```{r}
+metadata_boxplot_data_alltimepoints %>%
+  pivot_longer(
+    cols = c(
+      TSS_log2FC_90min_0h,
+      GeneBody_log2FC_90min_0h
+    ),
+    names_to = "dataset",
+    values_to = "log2FC"
+  ) %>%
+  mutate(
+    dataset = recode(
+      dataset,
+      TSS_log2FC_90min_0h = "TSS",
+      GeneBody_log2FC_90min_0h = "Gene Body"
+    )
+  ) %>%
+  ggplot(
+    aes(x = log2FC, fill = dataset)
+  ) +
+  geom_histogram(
+    binwidth = 0.02,
+    alpha = 0.5,
+    position = "identity"
+  ) +
+  theme_bw() +
+  labs(
+    title = "log2FC (90 min / 0 h): TSS vs Gene Body - sanity check",
+    x = "log2 Fold Change",
+    y = "Gene Count",
+    fill = "Feature"
+  ) +
+  coord_cartesian(ylim = c(0, 600))
+```
+
  
 test out different breaks of the promoter types
 ```{r}
