@@ -919,7 +919,7 @@ To determine the genes with high Pol II occupancy without excluding too many gen
 
 ```{r}
 
-#annotation file (the same as in ELOA P1)
+#annotation file 
 #hg38.gtf <- read.table("/Users/png/Downloads/Homo_sapiens.GRCh38.113.gtf", header=FALSE, sep= "\t")
 
 #generate non-overlapping gene annotation (using Granges, rtracklayer , and genomicfeatures)
@@ -931,7 +931,7 @@ To determine the genes with high Pol II occupancy without excluding too many gen
 #filter for genes longer than 1.0kb (for metagene analysis); if it's pausing index switch to 1.5kb and also change the up.ext and down.ext for the pausing index (remember this only factors for)
 
 #gene.gr already has gene width with more than 1kb (16917 entries); 1.5kb (16656 entries)
-#all are already portein codinh, non-overlapping, and from main chromosome
+#all are already portein coding, non-overlapping, and from main chromosome
 
 #filter by strands, again switch back using dataframe as for the downstream window defining step GRanges will be an issue
 intervals.df_pos <- hg38.genes.pos%>% 
@@ -951,7 +951,7 @@ write.table(intervals.df, "hg38.TSS.windows.1.0kb.bed", sep = "\t",quote = F, co
 
 Using only the 0h timepoint file ie control, identify the list of genes that has higher than background coverage. and for the pausing index analysis, keep these genes .
 
-Note updated this to 0.5 so that it matches what we see in the boxplot. However, further checking the code donstream i did not include the Pol II occupancy filter in the pausing index analysis initially ( i missed this). This has now been incorporated.
+Note updated this to 0.5 so that it matches what we see in the boxplot. However, further checking the code donstream i did not include the Pol II occupancy filter in the pausing index analysis initially (I missed this). This has now been incorporated.
 ```{r}
 # Import into R
 TSS_0h_D8L4Y_POLII_high <- read.table("D8L4Y_0h_merged.clean.cov_TSS.1.0kb.bed",header=F,sep="\t") %>% 
@@ -976,9 +976,9 @@ Given that the median normalised coverage is approximately 0.48, I set the ones 
 Now we have identified genes with high Pol II occupancy, we need to filter for genes that are longer than 1.5kb (end up using 1kb), and keep the ones which has higher pol II levels from the 1000 bp selection
 
 ```{r}
-# Filter out genes smaller than 1.5kb; select high Pol II occupancy promoters (>1x background)
+# Filter out genes smaller than 1.5kb; select high Pol II occupancy promoters (>1x background) -not in use
 
-#hg38.genes.standard.2 <- hg38.genes.standard %>% filter(length>=1500) %>% filter(gene %in% TSS_Total_high$gene_id)
+#hg38.genes.standard.2 <- hg38.genes.standard %>% filter(length>=1500) %>% filter(gene %in% TSS_Total_high$gene_id) 
 
 # Define TSS and gene body windows (note this part ties back to the beginning of the script which high pol II occupancy genes were NOT filtered - if needed this step needs to be added)
 
@@ -1104,7 +1104,7 @@ TSS_dfs_norm2 <- list.files(pattern = TSS_bed_pattern) %>%
   }) %>%
   bind_rows() %>% 
   mutate(match = paste0(condition,"_", gene_id)) %>% 
-  filter(gene_name %in% TSS_0h_D8L4Y_POLII_high$gene_id)
+  filter(gene_name %in% TSS_0h_D8L4Y_POLII_high$gene_id) #filtering for high Pol II occupancy is done here
 
 
 
@@ -1112,7 +1112,7 @@ TSS_dfs_norm2 <- list.files(pattern = TSS_bed_pattern) %>%
 #50751 entries for TSS;  merged_TSS %>% distinct(match) %>% count () = 50751 (this is not filtered for High Pol II occupancy)
 #read in all genebody as iindividual dataframe
 
-genebody_bed_pattern = "\\genebody.1.0kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected
+genebody_bed_pattern = "\\genebody.1.0kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected (file name has been updated for clarity)
 
 #function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome
 genebody_dfs_norm2 <- list.files(pattern = genebody_bed_pattern) %>%
