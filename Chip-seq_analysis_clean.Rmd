@@ -915,7 +915,7 @@ https://www.sciencedirect.com/science/article/pii/S1097276524009493?via%3Dihub#s
 
 Genes which are too short will not have chance to observe any pausing index
 
-To determine the genes with high Pol II occupancy without excluding too many genes from the start, we start from genes whihc are more than 1kb in length
+To determine the genes with high Pol II occupancy without excluding too many genes from the start, we start from genes which are more than 1kb in length
 
 ```{r}
 
@@ -1002,8 +1002,8 @@ hg38.TSS.bed <- rbind(hg38.TSS.bed.pos, hg38.TSS.bed.neg)
 hg38.gene.body.bed <- rbind(hg38.gene.body.bed.pos, hg38.gene.body.bed.neg)
 
 #export the TSS and bedfile
-write.table(hg38.TSS.bed, "hg38.TSS.windows.1.5kb.bed", sep = "\t",quote = F, col.names = F, row.names = F)
-write.table(hg38.gene.body.bed, "hg38.genebody.windows.1.5kb.bed", sep = "\t",quote = F, col.names = F, row.names = F)
+write.table(hg38.TSS.bed, "hg38.TSS.windows.1.0kb.bed", sep = "\t",quote = F, col.names = F, row.names = F)
+write.table(hg38.gene.body.bed, "hg38.genebody.windows.1.0kb.bed", sep = "\t",quote = F, col.names = F, row.names = F)
 ```
 
 
@@ -1033,7 +1033,7 @@ remap the RPKM normalised bed onto the 1.5kb (actually 1kb) filtered TSS and gen
 #sort -k1,1 -k2,2n ${OUTDIR}/hg38.genebody.windows.1.5kb.bed > ${OUTDIR}/hg38.genebody.windows.1.5kb.sorted.bed
 
 #map the TSS only bed to the coverage files
-bedtools map -a ${OUTDIR}/hg38.TSS.windows.1.5kb.sorted.bed -b ${OUTDIR}/upstreamnorm_bigwig/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_TSS.1.5kb.bed
+bedtools map -a ${OUTDIR}/hg38.TSS.windows.1.0kb.sorted.bed -b ${OUTDIR}/upstreamnorm_bigwig/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_TSS.1.0kb.bed
 
 
 # Check for errors
@@ -1046,7 +1046,7 @@ fi
 
 
 #map the genebody only bed to the coverage files
-bedtools map -a ${OUTDIR}/hg38.genebody.windows.1.5kb.sorted.bed -b ${OUTDIR}/upstreamnorm_bigwig/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_genebody.1.5kb.bed
+bedtools map -a ${OUTDIR}/hg38.genebody.windows.1.0kb.sorted.bed -b ${OUTDIR}/upstreamnorm_bigwig/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.clean.cov_genebody.1.0kb.bed
 
 
 # Check for errors
@@ -1064,7 +1064,7 @@ read in all the remapped bed files with binned coverage
 ```{r}
 
 #read in all TSS an individual dataframe
-TSS_bed_pattern = "\\TSS\\.1.5kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected
+TSS_bed_pattern = "\\TSS\\.1.0kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected
 
 #function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosomee
 TSS_dfs_norm2 <- list.files(pattern = TSS_bed_pattern) %>%
@@ -1112,7 +1112,7 @@ TSS_dfs_norm2 <- list.files(pattern = TSS_bed_pattern) %>%
 #50751 entries for TSS;  merged_TSS %>% distinct(match) %>% count () = 50751 (this is not filtered for High Pol II occupancy)
 #read in all genebody as iindividual dataframe
 
-genebody_bed_pattern = "\\genebody.1.5kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected
+genebody_bed_pattern = "\\genebody.1.0kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected
 
 #function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome
 genebody_dfs_norm2 <- list.files(pattern = genebody_bed_pattern) %>%
