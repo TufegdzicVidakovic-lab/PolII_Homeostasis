@@ -456,45 +456,44 @@ Same code is used for the 1kb (file names 2kb because 1kb up +1kb down)
 
 Then mapped it to the bigwig files
 ```{bash}
-####################################################################for the zoomed in metagene region#####################################################################
 #TSS region
-###### 500bp up- and downstream
-bedtools map -a ${OUTDIR}/hg38.genes.TSS.500bp.metagene.zoomin.500w.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.TSS.1kbzoom.500w.bed
+#bedtools map -a ${OUTDIR}/hg38.genes.TSS.1kb.metagene.zoomin.500w.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.TSS.1kbzoom.500w.bed
 # Check for errors
-if [ $? -ne 0 ]; then
-    echo "mapping to 500w tiled bed (TSS) failed for ${PREFIX}" >&2
-    exit 9
-else
-    echo "mapping to 500w tiled bed (TSS) succeeded for ${PREFIX}"
-fi
+#if [ $? -ne 0 ]; then
+    #echo "mapping to 500w tiled bed (TSS) failed for ${PREFIX}" >&2
+    #exit 9
+#else
+    #echo "mapping to 500w tiled bed (TSS) succeeded for ${PREFIX}"
+#fi
 
-
-###### 1kb up- and downstream
-bedtools map -a ${OUTDIR}/hg38.genes.TSS.1kb.metagene.zoomin.500w.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.TSS.2kbzoom.500w.bed
+#TTS region
+#bedtools map -a ${OUTDIR}/hg38.genes.TTS.1kb.metagene.zoomin.500w.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.TTS.1kbzoom.500w.bed
 # Check for errors
-if [ $? -ne 0 ]; then
-    echo "mapping to 500w tiled bed (TSS) failed for ${PREFIX}" >&2
-    exit 9
-else
-    echo "mapping to 500w tiled bed (TSS) succeeded for ${PREFIX}"
-fi
+#if [ $? -ne 0 ]; then
+    #echo "mapping to 500w tiled bed (TTS) failed for ${PREFIX}" >&2
+    #exit 9
+#else
+    #echo "mapping to 500w tiled bed (TTS) succeeded for ${PREFIX}"
+#fi
 
 #upstream 5kb region for normalisation
-bedtools map -a ${OUTDIR}/hg38.upstream.windows.20w.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.upstream.20w.bed
+#bedtools map -a ${OUTDIR}/hg38.upstream.windows.20w.sorted.bed -b ${OUTDIR}/${PREFIX}_merged_sorted.clean.bedGraph -c 4 -o mean -null 0 > ${OUTDIR}/${PREFIX}_merged.upstream.20w.bed
 # Check for errors
-if [ $? -ne 0 ]; then
-    echo "mapping to 20w tiled upstream bed failed for ${PREFIX}" >&2
-    exit 9
-else
-    echo "mapping to 20w tiled upstream bed succeeded for ${PREFIX}"
-fi
+#if [ $? -ne 0 ]; then
+    #echo "mapping to 20w tiled upstream bed failed for ${PREFIX}" >&2
+    #exit 9
+#else
+    #echo "mapping to 20w tiled upstream bed succeeded for ${PREFIX}"
+#fi
+
+
 ```
 
 read in all the remapped bed files with binned coverage (500win)
 ```{r}
 
 #"\\_merged.TSS.1kbzoom.500w.bed"
-TSS_zoom_bed_pattern = "\\_merged.TSS.2kbzoom.500w.bed"
+TSS_zoom_bed_pattern = "\\_merged.TSS.1kbzoom.500w.bed"
 
 #function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb (modified from Andrew's code). 
 list.files(pattern = TSS_zoom_bed_pattern) %>%
@@ -505,10 +504,10 @@ list.files(pattern = TSS_zoom_bed_pattern) %>%
       dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5) 
    
     # Extract prefix of filename (remove extension)
-    prefix <- str_remove(basename(x), "\\_merged.TSS.2kbzoom.500w.bed$") #change here
+    prefix <- str_remove(basename(x), "\\_merged.TSS.1kbzoom.500w.bed$") #change here
     
     # Assign individual dataframe to an object named after the prefix
-    assign(paste0(prefix, "_TSS_2kb_500w"), df, envir = .GlobalEnv) #changeh here
+    assign(paste0(prefix, "_TSS_1kb_500w"), df, envir = .GlobalEnv) #changeh here
   })
 
 
@@ -535,10 +534,10 @@ Read the TSS files, normalised to upstream 5kb (extracted seperately then map fo
 
 #list all the dataframe which I wanted to loop
 coverage_list_TSS_500w <- list(
-  D8L4Y_0h = D8L4Y_0h_TSS_2kb_500w,
-  D8L4Y_90min = D8L4Y_90min_TSS_2kb_500w,
-  D8L4Y_8h = D8L4Y_8h_TSS_2kb_500w, 
-  Input = INP_0h_TSS_2kb_500w
+  D8L4Y_0h = D8L4Y_0h_TSS_1kb_500w,
+  D8L4Y_90min = D8L4Y_90min_TSS_1kb_500w,
+  D8L4Y_8h = D8L4Y_8h_TSS_1kb_500w, 
+  Input = INP_0h_TSS_1kb_500w
 )
 
 upstreamcov_list_20w <- list(
@@ -728,7 +727,7 @@ write.table(hg38.TTS.bed.neg_1kb, "hg38.TTS.bed.neg.1kb.bed", sep = "\t", quote 
 
 Read the TTS files, normalised to upstream 5kb (extracted seperately) then plot the zoomed-in metagene plot
 ```{r}
-TTS_zoom_bed_pattern = "\\_merged.TTS.2kbzoom.500w.bed"
+TTS_zoom_bed_pattern = "\\_merged.TTS.1kbzoom.500w.bed"
 
 #function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb (modified from Andrew's code). 
 list.files(pattern = TTS_zoom_bed_pattern) %>%
@@ -739,10 +738,10 @@ list.files(pattern = TTS_zoom_bed_pattern) %>%
       dplyr::rename("chr" = V1, "start" = V2, "end" = V3, "bin" = V4, "COV" = V5) 
    
     # Extract prefix of filename (remove extension)
-    prefix <- str_remove(basename(x), "\\_merged.TTS.2kbzoom.500w.bed$")
+    prefix <- str_remove(basename(x), "\\_merged.TTS.1kbzoom.500w.bed$")
     
     # Assign individual dataframe to an object named after the prefix (this will only work with "walk" as walk discards read-ins after reading)
-    assign(paste0(prefix, "_TTS_2kb_500w"), df, envir = .GlobalEnv)
+    assign(paste0(prefix, "_TTS_1kb_500w"), df, envir = .GlobalEnv)
   })
 
 downstream5kb_20w_bed_pattern = "\\_merged.downstream.20w.bed"
@@ -771,10 +770,10 @@ Use the same upstream normalisation
 
 #list all the dataframe which I wanted to loop
 coverage_list_TTS_500w <- list(
-  D8L4Y_0h = D8L4Y_0h_TTS_2kb_500w,
-  D8L4Y_90min = D8L4Y_90min_TTS_2kb_500w,
-  D8L4Y_8h = D8L4Y_8h_TTS_2kb_500w,
-  Input = INP_0h_TTS_2kb_500w
+  D8L4Y_0h = D8L4Y_0h_TTS_1kb_500w,
+  D8L4Y_90min = D8L4Y_90min_TTS_1kb_500w,
+  D8L4Y_8h = D8L4Y_8h_TTS_1kb_500w,
+  Input = INP_0h_TTS_1kb_500w
 )
 
 # Apply the same transformation to all datasets
