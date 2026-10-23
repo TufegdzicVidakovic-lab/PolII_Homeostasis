@@ -513,7 +513,7 @@ list.files(pattern = TSS_zoom_bed_pattern) %>%
 
 upstream5kb_20w_bed_pattern = "\\_merged.upstream.20w.bed"
 
-#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb (modified from Andrew's code). 
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalculate the distance so it is 5kb (modified from Andrew's code). 
 list.files(pattern = upstream5kb_20w_bed_pattern) %>%
   walk(function(x) {
     print(x)
@@ -529,7 +529,7 @@ list.files(pattern = upstream5kb_20w_bed_pattern) %>%
   })
 ```
 
-Read the TSS files, normalised to upstream 5kb (extracted seperately then map for the upstream coverage as a separte input bed file) then plot the zoomed-in metagene plot
+Read the TSS files, normalised to upstream 5kb (extracted seperately then map for the upstream coverage as a separate input bed file) then plot the zoomed-in metagene plot
 ```{r}
 
 #list all the dataframe which I wanted to loop
@@ -729,7 +729,7 @@ Read the TTS files, normalised to upstream 5kb (extracted seperately) then plot 
 ```{r}
 TTS_zoom_bed_pattern = "\\_merged.TTS.1kbzoom.500w.bed"
 
-#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb (modified from Andrew's code). 
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalculate the distance so it is 5kb (modified from Andrew's code). 
 list.files(pattern = TTS_zoom_bed_pattern) %>%
   walk(function(x) {
     print(x)
@@ -746,7 +746,7 @@ list.files(pattern = TTS_zoom_bed_pattern) %>%
 
 downstream5kb_20w_bed_pattern = "\\_merged.downstream.20w.bed"
 
-#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalcuklate the distance so it is 5kb (modified from Andrew's code). 
+#function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosome, then recalculate the distance so it is 5kb (modified from Andrew's code). 
 list.files(pattern = downstream5kb_20w_bed_pattern) %>%
   walk(function(x) {
     #print(x)
@@ -928,7 +928,7 @@ To determine the genes with high Pol II occupancy without excluding too many gen
 #names(gene.gr) <- gene.gr$gene_id
 #gene.gr$gene.width <- GenomicRanges::width(gene.gr)
 #gene.gr$gene_name_column <- gene.gr$gene_name
-#filter for genes longer than 1.0kb (for metagene analysis); if it's pausing index switch to 1.5kb and also change the up.ext and down.ext for the pausing index (remember this only factors for)
+#filter for genes longer than 1.0kb (for metagene analysis); if it's pausing index switch to 1.5kb and also change the up.ext and down.ext for the pausing index (end up using >1.0kb in final analysis)
 
 #gene.gr already has gene width with more than 1kb (16917 entries); 1.5kb (16656 entries)
 #all are already portein coding, non-overlapping, and from main chromosome
@@ -1064,7 +1064,7 @@ read in all the remapped bed files with binned coverage
 ```{r}
 
 #read in all TSS an individual dataframe
-TSS_bed_pattern = "\\TSS\\.1.0kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected
+TSS_bed_pattern = "\\TSS\\.1.0kb\\.bed" #note even tho file name says 1.5kb, i actually used 1kb because of the object I have selected (file name has been updated for clarity)
 
 #function to read all the remapped bed, walk (same as map but does not return a list), then rename the chrmosomee
 TSS_dfs_norm2 <- list.files(pattern = TSS_bed_pattern) %>%
@@ -1151,7 +1151,8 @@ genebody_dfs_norm2 <- list.files(pattern = genebody_bed_pattern) %>%
     return(df3)
   }) %>%
   bind_rows()%>% 
-  mutate(match = paste0(condition,"_", gene_id))%>% filter(gene_name %in% TSS_0h_D8L4Y_POLII_high$gene_id)
+  mutate(match = paste0(condition,"_", gene_id))%>% 
+filter(gene_name %in% TSS_0h_D8L4Y_POLII_high$gene_id)#filtering for high Pol II occupancy is done here
 
 
 #before renormalising using upstream normalisation with deeptools normalisation factor; same after renormalisation just to make sure nothing changed
@@ -1360,8 +1361,10 @@ Use gene length > 1000 bp for TSS and TTS; and gene body use gene length > 5000 
 #TSS (gene length > 1kb)
 hg38.TSS.bed.pos <- hg38.genes.pos %>% mutate(start=as.numeric(start-500), end=as.numeric(start+1000)) %>% filter(start>0) 
 hg38.TSS.bed.neg <- hg38.genes.neg %>% mutate(start=as.numeric(end-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+
 #hg38.TSS.bed.pos <- hg38.genes.standard.2  %>% filter(strand=="+") %>% mutate(start=as.numeric(start-500), end=as.numeric(start+1000)) %>% filter(start>0) 
 #hg38.TSS.bed.neg <- hg38.genes.standard.2  %>% filter(strand=="-") %>% mutate(start=as.numeric(end-500), end=as.numeric(start+1000)) %>% filter(start>0) 
+
 #combined TSS
 hg38.TSS.bed <- rbind(hg38.TSS.bed.pos,hg38.TSS.bed.neg)
 
